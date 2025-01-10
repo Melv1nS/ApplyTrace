@@ -19,6 +19,9 @@ A web application that will monitor a user's email inbox and check for any job a
             ├── api/            # Api Routes
                 ├── sample-route/     # name of the route
                     ├── route.ts      
+            ├── auth/
+                ├── signin/
+                ├── callback/
             ├── components/     # Shared React components
             ├── utils/          # Helper functions
             ├── types/          # TypeScript types
