@@ -9,6 +9,10 @@ interface WatchResponse {
 
 export async function setupGmailWatch(accessToken: string): Promise<WatchResponse> {
   try {
+    if (!process.env.GOOGLE_CLOUD_PROJECT_ID || !process.env.PUBSUB_TOPIC_NAME) {
+      throw new Error('Missing required environment variables for Gmail watch setup')
+    }
+
     const oauth2Client = new google.auth.OAuth2()
     oauth2Client.setCredentials({
       access_token: accessToken
@@ -27,8 +31,8 @@ export async function setupGmailWatch(accessToken: string): Promise<WatchRespons
 
     return {
       success: true,
-      expiration: response.data.expiration,
-      historyId: response.data.historyId
+      expiration: response.data.expiration ?? undefined,
+      historyId: response.data.historyId ?? undefined
     }
   } catch (error) {
     console.error('Error setting up Gmail watch:', error)
