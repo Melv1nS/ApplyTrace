@@ -14,11 +14,11 @@ interface GeminiAnalysis {
   confidence: number;
 }
 
-async function analyzeWithGemini(subject: string, body: string): Promise<GeminiAnalysis> {
+async function analyzeWithGemini(subject: string, emailBody: string): Promise<GeminiAnalysis> {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
-  const prompt = `Analyze this email for job application related content. Subject: "${subject}" Body: "${body}"
+  const prompt = `Analyze this email for job application related content. Subject: "${subject}" Body: "${emailBody}"
     Return a JSON object with the following fields:
     - isJobRelated (boolean): is this email related to a job application?
     - type: either "APPLICATION", "REJECTION", or "OTHER"
@@ -33,46 +33,33 @@ async function analyzeWithGemini(subject: string, body: string): Promise<GeminiA
   return JSON.parse(response.text());
 }
 
-// Function to extract job application details from email
-async function extractJobDetails(message: any) {
-  const subject = message.payload.headers.find(
-    (header: any) => header.name.toLowerCase() === 'subject'
-  )?.value || '';
-
-  const body = message.payload.parts?.[0]?.body?.data || '';
-  const decodedBody = Buffer.from(body, 'base64').toString('utf-8');
-
-  const analysis = await analyzeWithGemini(subject, decodedBody);
-
-  if (!analysis.isJobRelated || analysis.confidence < 0.7) {
-    return null;
-  }
-
-  return {
-    companyName: analysis.companyName,
-    roleTitle: analysis.roleTitle,
-    status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
-    emailId: message.id,
-    confidence: analysis.confidence
-  };
-}
-
 export async function POST(request: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
-    const { data: { session } } = await supabase.auth.getSession()
+    const requestBody = await request.json()
+    const { userId, emailId } = requestBody.message?.data || {}
 
-    if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    if (!emailId || !userId) {
+      console.error('Missing required data in webhook payload')
+      return NextResponse.json({ error: 'Missing required data' }, { status: 400 })
     }
 
-    const payload = await request.json()
-    const { message } = payload
+    // Get user session from email metadata
+    const supabase = createRouteHandlerClient({ cookies })
+    const { data: userSession } = await supabase
+      .from('email_sessions')
+      .select('user_id, access_token')
+      .eq('user_id', userId)
+      .single()
+
+    if (!userSession) {
+      console.error('No user session found for user:', userId)
+      return NextResponse.json({ error: 'User session not found' }, { status: 404 })
+    }
 
     // Initialize Gmail API client
     const oauth2Client = new google.auth.OAuth2()
     oauth2Client.setCredentials({
-      access_token: session.provider_token
+      access_token: userSession.access_token
     })
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
@@ -80,31 +67,52 @@ export async function POST(request: Request) {
     // Get full message details
     const { data: fullMessage } = await gmail.users.messages.get({
       userId: 'me',
-      id: message.data.emailId,
+      id: emailId,
       format: 'full'
     })
 
-    const jobDetails = await extractJobDetails(fullMessage)
+    // Extract email content
+    const headers = fullMessage.payload?.headers || []
+    const subject = headers.find(h => h?.name?.toLowerCase() === 'subject')?.value || ''
+    const messageBody = fullMessage.payload?.parts?.[0]?.body?.data || ''
+    const decodedBody = Buffer.from(messageBody, 'base64').toString('utf-8')
 
-    if (jobDetails) {
+    console.log('Analyzing email:', { subject, emailId })
+    const analysis = await analyzeWithGemini(subject, decodedBody)
+    console.log('Analysis result:', analysis)
+
+    if (analysis.isJobRelated && analysis.confidence > 0.7) {
       // Check if we already have this email processed
       const { data: existingJob } = await supabase
         .from('job_applications')
         .select('id')
-        .eq('email_id', jobDetails.emailId)
+        .eq('email_id', emailId)
         .single()
 
       if (!existingJob) {
+        console.log('Creating new job application:', {
+          companyName: analysis.companyName,
+          roleTitle: analysis.roleTitle,
+          status: analysis.type
+        })
+
         // Create new job application
         await supabase.from('job_applications').insert({
-          userId: session.user.id,
-          companyName: jobDetails.companyName,
-          roleTitle: jobDetails.roleTitle,
-          status: jobDetails.status,
+          userId: userSession.user_id,
+          companyName: analysis.companyName,
+          roleTitle: analysis.roleTitle,
+          status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
           appliedDate: new Date().toISOString(),
-          emailId: jobDetails.emailId
+          emailId: emailId
         })
+      } else {
+        console.log('Job application already exists for email:', emailId)
       }
+    } else {
+      console.log('Email not job-related or low confidence:', {
+        isJobRelated: analysis.isJobRelated,
+        confidence: analysis.confidence
+      })
     }
 
     return NextResponse.json({ success: true })

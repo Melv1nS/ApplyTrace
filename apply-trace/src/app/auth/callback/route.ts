@@ -22,9 +22,9 @@ export async function GET(request: Request) {
         }
 
         // Set up Gmail watch if we have a valid session with provider token
-        if (session?.provider_token) {
+        if (session?.provider_token && session?.user?.id) {
             try {
-                await setupGmailWatch(session.provider_token)
+                await setupGmailWatch(session.provider_token, session.user.id)
             } catch (error) {
                 console.error('Error setting up Gmail watch:', error)
                 // Continue with redirect even if Gmail watch setup fails

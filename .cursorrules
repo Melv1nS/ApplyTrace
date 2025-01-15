@@ -11,6 +11,9 @@ A web application that will monitor a user's email inbox and check for any job a
 - Use descriptive variable names with auxiliary verbs (e.g., isLoading, hasError)
 - Structure repository files as follows:
 
+## IMPORTANT ##
+WORK INSIDE THE apply-trace DIRECTORY
+
 ```
 ├── apply-trace/
     ├── public/

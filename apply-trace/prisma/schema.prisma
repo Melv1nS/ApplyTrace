@@ -22,6 +22,17 @@ model JobApplication {
   @@index([userId])
 }
 
+model EmailSession {
+  id           String   @id @default(uuid())
+  userId       String   @unique @map("user_id")
+  accessToken  String   @map("access_token")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("email_sessions")
+  @@index([userId])
+}
+
 enum JobStatus {
   APPLIED
   REJECTED
