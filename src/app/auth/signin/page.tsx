@@ -10,8 +10,8 @@ export default function SignIn() {
         await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/auth/callback`,
-                scopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/gmail.modify',
+                redirectTo: `${window.location.origin}/auth/callback/google`,
+                scopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile',
             },
         });
     };
@@ -41,4 +41,4 @@ export default function SignIn() {
             </div>
         </div>
     );
-}
+} 
