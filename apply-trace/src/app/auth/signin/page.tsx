@@ -7,10 +7,11 @@ export default function SignIn() {
     const supabase = createClientComponentClient();
 
     const handleSignIn = async () => {
+        const redirectURL = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
         await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/auth/callback`,
+                redirectTo: `${redirectURL}/auth/callback`,
                 scopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/gmail.modify',
             },
         });
