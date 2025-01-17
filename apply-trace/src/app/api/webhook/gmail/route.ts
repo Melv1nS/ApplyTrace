@@ -66,25 +66,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid message data' }, { status: 400 })
     }
 
-    // Extract email and user IDs from various possible formats
-    const emailId = data.emailId || data.message?.emailId || data.historyId
-    const userId = data.userId || data.message?.userId || data.userEmail
+    console.log('Parsed notification data:', data)
 
-    if (!emailId || !userId) {
-      console.error('Missing required data in decoded payload:', { emailId, userId, data })
-      return NextResponse.json({ error: 'Missing required data' }, { status: 400 })
+    // Gmail notifications contain emailAddress and historyId
+    const emailAddress = data.emailAddress
+    const historyId = data.historyId
+
+    if (!emailAddress || !historyId) {
+      console.error('Missing required Gmail data:', { emailAddress, historyId, data })
+      return NextResponse.json({ error: 'Missing required Gmail data' }, { status: 400 })
     }
 
-    // Get user session from email metadata
+    // Get user session from email metadata using email address
     const supabase = createRouteHandlerClient({ cookies })
     const { data: userSession } = await supabase
       .from('email_sessions')
       .select('user_id, access_token')
-      .eq('user_id', userId)
+      .eq('email', emailAddress)  // We'll need to add this column to the email_sessions table
       .single()
 
     if (!userSession) {
-      console.error('No user session found for user:', userId)
+      console.error('No user session found for email:', emailAddress)
       return NextResponse.json({ error: 'User session not found' }, { status: 404 })
     }
 
@@ -96,56 +98,72 @@ export async function POST(request: Request) {
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
 
-    // Get full message details
-    const { data: fullMessage } = await gmail.users.messages.get({
+    // Get history list to find the new message
+    const { data: history } = await gmail.users.history.list({
       userId: 'me',
-      id: emailId,
-      format: 'full'
+      startHistoryId: historyId,
+      historyTypes: ['messageAdded']
     })
 
-    // Extract email content
-    const headers = fullMessage.payload?.headers || []
-    const subject = headers.find(h => h?.name?.toLowerCase() === 'subject')?.value || ''
-    const messageBody = fullMessage.payload?.parts?.[0]?.body?.data || ''
-    const decodedBody = Buffer.from(messageBody, 'base64').toString('utf-8')
+    // Process each new message in the history
+    const messagePromises = history.history?.[0]?.messagesAdded?.map(async (added) => {
+      const messageId = added.message?.id
+      if (!messageId) return
 
-    console.log('Analyzing email:', { subject, emailId })
-    const analysis = await analyzeWithGemini(subject, decodedBody)
-    console.log('Analysis result:', analysis)
-
-    if (analysis.isJobRelated && analysis.confidence > 0.7) {
-      // Check if we already have this email processed
-      const { data: existingJob } = await supabase
-        .from('job_applications')
-        .select('id')
-        .eq('email_id', emailId)
-        .single()
-
-      if (!existingJob) {
-        console.log('Creating new job application:', {
-          companyName: analysis.companyName,
-          roleTitle: analysis.roleTitle,
-          status: analysis.type
-        })
-
-        // Create new job application
-        await supabase.from('job_applications').insert({
-          userId: userSession.user_id,
-          companyName: analysis.companyName,
-          roleTitle: analysis.roleTitle,
-          status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
-          appliedDate: new Date().toISOString(),
-          emailId: emailId
-        })
-      } else {
-        console.log('Job application already exists for email:', emailId)
-      }
-    } else {
-      console.log('Email not job-related or low confidence:', {
-        isJobRelated: analysis.isJobRelated,
-        confidence: analysis.confidence
+      // Get full message details
+      const { data: fullMessage } = await gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full'
       })
-    }
+
+      // Extract email content
+      const headers = fullMessage.payload?.headers || []
+      const subject = headers.find(h => h?.name?.toLowerCase() === 'subject')?.value || ''
+      const messageBody = fullMessage.payload?.parts?.[0]?.body?.data || ''
+      const decodedBody = Buffer.from(messageBody, 'base64').toString('utf-8')
+
+      console.log('Processing email:', { subject, messageId })
+      const analysis = await analyzeWithGemini(subject, decodedBody)
+      console.log('Analysis result:', analysis)
+
+      if (analysis.isJobRelated && analysis.confidence > 0.7) {
+        // Check if we already have this email processed
+        const { data: existingJob } = await supabase
+          .from('job_applications')
+          .select('id')
+          .eq('email_id', messageId)
+          .single()
+
+        if (!existingJob) {
+          console.log('Creating new job application:', {
+            companyName: analysis.companyName,
+            roleTitle: analysis.roleTitle,
+            status: analysis.type
+          })
+
+          // Create new job application
+          await supabase.from('job_applications').insert({
+            userId: userSession.user_id,
+            companyName: analysis.companyName,
+            roleTitle: analysis.roleTitle,
+            status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
+            appliedDate: new Date().toISOString(),
+            emailId: messageId
+          })
+        } else {
+          console.log('Job application already exists for email:', messageId)
+        }
+      } else {
+        console.log('Email not job-related or low confidence:', {
+          isJobRelated: analysis.isJobRelated,
+          confidence: analysis.confidence
+        })
+      }
+    }) || []
+
+    // Wait for all messages to be processed
+    await Promise.all(messagePromises)
 
     return NextResponse.json({ success: true })
   } catch (error) {
