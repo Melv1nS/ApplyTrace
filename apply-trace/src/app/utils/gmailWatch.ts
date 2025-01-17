@@ -77,25 +77,34 @@ async function verifyPubSubSetup(pubsub: pubsub_v1.Pubsub, topicName: string) {
       }
     }
 
-    // Set up topic permissions for Gmail service
+    // Give Gmail's service account permission to publish to this topic
+    // This is required so Gmail can send notifications when new emails arrive
     try {
-      logDebug('SETTING_TOPIC_PERMISSIONS')
+      logDebug('SETTING_GMAIL_PERMISSIONS', {
+        topic: topicName,
+        gmailServiceAccount: 'gmail-api-push@system.gserviceaccount.com'
+      })
+
       await pubsub.projects.topics.setIamPolicy({
         resource: topicName,
         requestBody: {
           policy: {
             bindings: [
               {
+                // Allow Gmail's service account to publish to this topic
                 role: 'roles/pubsub.publisher',
-                members: ['serviceAccount:gmail-api-push@system.gserviceaccount.com']
+                members: [
+                  // This is Google's service account that Gmail uses to send notifications
+                  'serviceAccount:gmail-api-push@system.gserviceaccount.com'
+                ]
               }
             ]
           }
         }
       })
-      logDebug('TOPIC_PERMISSIONS_SET')
+      logDebug('GMAIL_PERMISSIONS_SET')
     } catch (error) {
-      logError('TOPIC_PERMISSIONS_ERROR', error)
+      logError('GMAIL_PERMISSIONS_ERROR', error)
       throw error
     }
 
