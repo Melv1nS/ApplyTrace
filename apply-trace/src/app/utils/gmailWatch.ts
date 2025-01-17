@@ -1,4 +1,5 @@
 import { google } from 'googleapis'
+import { pubsub_v1 } from 'googleapis'
 
 interface WatchResponse {
   success: boolean;
@@ -58,35 +59,9 @@ async function getServiceAccountAuth() {
   }
 }
 
-export async function setupGmailWatch(accessToken: string, userId: string): Promise<WatchResponse> {
+async function verifyPubSubSetup(pubsub: pubsub_v1.Pubsub, topicName: string) {
   try {
-    if (!process.env.GOOGLE_CLOUD_PROJECT_ID || !process.env.PUBSUB_TOPIC_NAME) {
-      logError('CONFIG_ERROR', {
-        projectId: !!process.env.GOOGLE_CLOUD_PROJECT_ID,
-        topicName: !!process.env.PUBSUB_TOPIC_NAME,
-        projectIdValue: process.env.GOOGLE_CLOUD_PROJECT_ID // Log actual project ID
-      })
-      throw new Error('Missing required environment variables for Gmail watch setup')
-    }
-
-    logDebug('SETUP_START', { userId })
-
-    // Get service account auth for Pub/Sub operations
-    const serviceAuth = await getServiceAccountAuth()
-
-    // Set up Gmail client with user's access token
-    const oauth2Client = new google.auth.OAuth2()
-    oauth2Client.setCredentials({
-      access_token: accessToken
-    })
-
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
-    const topicName = `projects/${process.env.GOOGLE_CLOUD_PROJECT_ID}/topics/${process.env.PUBSUB_TOPIC_NAME}`
-
-    // Initialize Pub/Sub with service account
-    const pubsub = google.pubsub({ version: 'v1', auth: serviceAuth })
-
-    // Verify topic exists or create it
+    // First, verify the topic exists
     try {
       logDebug('VERIFY_TOPIC', { topicName })
       await pubsub.projects.topics.get({ topic: topicName })
@@ -98,13 +73,58 @@ export async function setupGmailWatch(accessToken: string, userId: string): Prom
         await pubsub.projects.topics.create({ name: topicName })
         logDebug('TOPIC_CREATED')
       } else {
-        logError('TOPIC_ACCESS_ERROR', error)
         throw error
       }
     }
 
-    logDebug('TOPIC_CONFIG', { topicName })
+    // Verify permissions by trying to publish a test message
+    logDebug('TESTING_PUBSUB_PERMISSIONS')
+    const testMessage = Buffer.from('test').toString('base64')
+    await pubsub.projects.topics.publish({
+      topic: topicName,
+      requestBody: {
+        messages: [{ data: testMessage }]
+      }
+    })
+    logDebug('PUBSUB_PERMISSIONS_VERIFIED')
 
+    return true
+  } catch (error) {
+    logError('PUBSUB_SETUP_VERIFICATION_FAILED', error)
+    throw error
+  }
+}
+
+export async function setupGmailWatch(accessToken: string, userId: string): Promise<WatchResponse> {
+  try {
+    if (!process.env.GOOGLE_CLOUD_PROJECT_ID || !process.env.PUBSUB_TOPIC_NAME) {
+      logError('CONFIG_ERROR', {
+        projectId: !!process.env.GOOGLE_CLOUD_PROJECT_ID,
+        topicName: !!process.env.PUBSUB_TOPIC_NAME,
+        projectIdValue: process.env.GOOGLE_CLOUD_PROJECT_ID
+      })
+      throw new Error('Missing required environment variables for Gmail watch setup')
+    }
+
+    logDebug('SETUP_START', { userId })
+
+    // Set up service account auth for Pub/Sub operations
+    const serviceAuth = await getServiceAccountAuth()
+    const pubsub = google.pubsub({ version: 'v1', auth: serviceAuth })
+
+    // Set up OAuth client with user's access token for Gmail operations
+    const oauth2Client = new google.auth.OAuth2()
+    oauth2Client.setCredentials({
+      access_token: accessToken
+    })
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
+
+    const topicName = `projects/${process.env.GOOGLE_CLOUD_PROJECT_ID}/topics/${process.env.PUBSUB_TOPIC_NAME}`
+
+    // Verify Pub/Sub setup before attempting Gmail watch
+    await verifyPubSubSetup(pubsub, topicName)
+
+    logDebug('STARTING_GMAIL_WATCH', { topicName })
     const response = await gmail.users.watch({
       userId: 'me',
       requestBody: {
