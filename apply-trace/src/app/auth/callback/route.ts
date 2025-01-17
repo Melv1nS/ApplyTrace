@@ -29,6 +29,7 @@ export async function GET(request: Request) {
                 const { error: upsertError } = await supabase
                     .from('email_sessions')
                     .upsert({
+                        id: crypto.randomUUID(),
                         user_id: session.user.id,
                         access_token: session.provider_token,
                         created_at: new Date().toISOString(),
