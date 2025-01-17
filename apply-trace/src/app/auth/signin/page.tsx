@@ -12,7 +12,11 @@ export default function SignIn() {
             provider: 'google',
             options: {
                 redirectTo: `${redirectURL}/auth/callback`,
-                scopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/gmail.modify',
+                scopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.metadata',
+                queryParams: {
+                    access_type: 'offline',
+                    prompt: 'consent'
+                }
             },
         });
     };
