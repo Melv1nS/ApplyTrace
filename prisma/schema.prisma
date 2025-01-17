@@ -1,9 +1,0 @@
-model EmailSession {
-  id          String   @id @default(cuid())
-  user_id     String   @unique
-  access_token String
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  @@map("email_sessions")
-} 

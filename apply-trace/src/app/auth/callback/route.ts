@@ -24,6 +24,15 @@ export async function GET(request: Request) {
         // Set up Gmail watch if we have a valid session with provider token
         if (session?.provider_token && session?.user?.id) {
             try {
+                // Store token in Supabase for testing
+                await supabase
+                    .from('email_sessions')
+                    .upsert({
+                        user_id: session.user.id,
+                        access_token: session.provider_token,
+                        created_at: new Date().toISOString()
+                    })
+
                 await setupGmailWatch(session.provider_token, session.user.id)
             } catch (error) {
                 console.error('Error setting up Gmail watch:', error)
