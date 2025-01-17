@@ -36,10 +36,27 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
 export async function POST(request: Request) {
   try {
     const requestBody = await request.json()
-    const { userId, emailId } = requestBody.message?.data || {}
+
+    // Log the incoming payload for debugging
+    console.log('Received webhook payload:', JSON.stringify(requestBody))
+
+    // Handle Pub/Sub push notification format
+    const message = requestBody.message
+    if (!message?.data) {
+      console.error('Invalid Pub/Sub message format')
+      return NextResponse.json({ error: 'Invalid message format' }, { status: 400 })
+    }
+
+    // Pub/Sub messages come base64 encoded
+    const decodedData = Buffer.from(message.data, 'base64').toString()
+    console.log('Decoded message data:', decodedData)
+
+    const data = JSON.parse(decodedData)
+    const emailId = data.emailId || data.message?.emailId
+    const userId = data.userId || data.message?.userId
 
     if (!emailId || !userId) {
-      console.error('Missing required data in webhook payload')
+      console.error('Missing required data in decoded payload:', { emailId, userId })
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 })
     }
 

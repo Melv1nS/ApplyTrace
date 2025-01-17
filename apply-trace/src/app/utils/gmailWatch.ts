@@ -77,16 +77,27 @@ async function verifyPubSubSetup(pubsub: pubsub_v1.Pubsub, topicName: string) {
       }
     }
 
-    // Verify permissions by trying to publish a test message
-    logDebug('TESTING_PUBSUB_PERMISSIONS')
-    const testMessage = Buffer.from('test').toString('base64')
-    await pubsub.projects.topics.publish({
-      topic: topicName,
-      requestBody: {
-        messages: [{ data: testMessage }]
-      }
-    })
-    logDebug('PUBSUB_PERMISSIONS_VERIFIED')
+    // Set up topic permissions for Gmail service
+    try {
+      logDebug('SETTING_TOPIC_PERMISSIONS')
+      await pubsub.projects.topics.setIamPolicy({
+        resource: topicName,
+        requestBody: {
+          policy: {
+            bindings: [
+              {
+                role: 'roles/pubsub.publisher',
+                members: ['serviceAccount:gmail-api-push@system.gserviceaccount.com']
+              }
+            ]
+          }
+        }
+      })
+      logDebug('TOPIC_PERMISSIONS_SET')
+    } catch (error) {
+      logError('TOPIC_PERMISSIONS_ERROR', error)
+      throw error
+    }
 
     return true
   } catch (error) {
