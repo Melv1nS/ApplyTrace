@@ -79,16 +79,36 @@ export async function POST(request: Request) {
 
     // Get user session from email metadata using email address
     const supabase = createRouteHandlerClient({ cookies })
-    const { data: userSession } = await supabase
+    console.log('Looking up session for email:', emailAddress)
+
+    const { data: userSession, error: sessionError } = await supabase
       .from('email_sessions')
-      .select('user_id, access_token')
-      .eq('email', emailAddress)  // We'll need to add this column to the email_sessions table
+      .select('user_id, access_token, email')
+      .eq('email', emailAddress)
       .single()
 
+    if (sessionError) {
+      console.error('Error fetching user session:', sessionError)
+      return NextResponse.json({ error: 'Error fetching user session' }, { status: 500 })
+    }
+
     if (!userSession) {
+      // Double check if the session exists with a case-insensitive search
+      const { data: allSessions } = await supabase
+        .from('email_sessions')
+        .select('user_id, access_token, email')
+
+      console.log('All available sessions:', allSessions)
+
       console.error('No user session found for email:', emailAddress)
       return NextResponse.json({ error: 'User session not found' }, { status: 404 })
     }
+
+    console.log('Found user session:', {
+      userId: userSession.user_id,
+      hasAccessToken: !!userSession.access_token,
+      email: userSession.email
+    })
 
     // Initialize Gmail API client
     const oauth2Client = new google.auth.OAuth2()
