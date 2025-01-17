@@ -22,17 +22,40 @@ function logError(stage: string, error: unknown) {
 
 async function getServiceAccountAuth() {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY) {
+    logError('AUTH_CONFIG', {
+      hasEmail: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      hasKey: !!process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
+    })
     throw new Error('Missing service account credentials')
   }
 
-  const auth = new google.auth.JWT({
-    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    key: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    scopes: ['https://www.googleapis.com/auth/pubsub']
-  })
+  try {
+    logDebug('SERVICE_ACCOUNT_INFO', {
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      keyLength: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.length,
+      hasBeginKey: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.includes('BEGIN PRIVATE KEY'),
+      hasEndKey: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.includes('END PRIVATE KEY')
+    })
 
-  await auth.authorize()
-  return auth
+    const auth = new google.auth.JWT({
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      key: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      scopes: ['https://www.googleapis.com/auth/pubsub']
+    })
+
+    logDebug('AUTHORIZING_SERVICE_ACCOUNT')
+    const credentials = await auth.authorize()
+    logDebug('SERVICE_ACCOUNT_AUTHORIZED', {
+      hasToken: !!credentials.access_token,
+      tokenType: credentials.token_type,
+      expiryDate: credentials.expiry_date
+    })
+
+    return auth
+  } catch (error) {
+    logError('SERVICE_ACCOUNT_AUTH_FAILED', error)
+    throw error
+  }
 }
 
 export async function setupGmailWatch(accessToken: string, userId: string): Promise<WatchResponse> {
@@ -40,7 +63,8 @@ export async function setupGmailWatch(accessToken: string, userId: string): Prom
     if (!process.env.GOOGLE_CLOUD_PROJECT_ID || !process.env.PUBSUB_TOPIC_NAME) {
       logError('CONFIG_ERROR', {
         projectId: !!process.env.GOOGLE_CLOUD_PROJECT_ID,
-        topicName: !!process.env.PUBSUB_TOPIC_NAME
+        topicName: !!process.env.PUBSUB_TOPIC_NAME,
+        projectIdValue: process.env.GOOGLE_CLOUD_PROJECT_ID // Log actual project ID
       })
       throw new Error('Missing required environment variables for Gmail watch setup')
     }
@@ -64,13 +88,17 @@ export async function setupGmailWatch(accessToken: string, userId: string): Prom
 
     // Verify topic exists or create it
     try {
-      logDebug('VERIFY_TOPIC')
+      logDebug('VERIFY_TOPIC', { topicName })
       await pubsub.projects.topics.get({ topic: topicName })
+      logDebug('TOPIC_EXISTS')
     } catch (error) {
-      if ((error as any)?.response?.status === 404) {
-        logDebug('CREATING_TOPIC')
+      const pubsubError = error as { response?: { status?: number } }
+      if (pubsubError?.response?.status === 404) {
+        logDebug('CREATING_TOPIC', { topicName })
         await pubsub.projects.topics.create({ name: topicName })
+        logDebug('TOPIC_CREATED')
       } else {
+        logError('TOPIC_ACCESS_ERROR', error)
         throw error
       }
     }
