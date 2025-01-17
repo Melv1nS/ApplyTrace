@@ -51,12 +51,27 @@ export async function POST(request: Request) {
     const decodedData = Buffer.from(message.data, 'base64').toString()
     console.log('Decoded message data:', decodedData)
 
-    const data = JSON.parse(decodedData)
-    const emailId = data.emailId || data.message?.emailId
-    const userId = data.userId || data.message?.userId
+    // Handle Gmail push notification format
+    // The message might be a test message from topic setup
+    if (decodedData === 'test') {
+      console.log('Received test message, acknowledging')
+      return NextResponse.json({ success: true })
+    }
+
+    let data: any
+    try {
+      data = JSON.parse(decodedData)
+    } catch (error) {
+      console.error('Failed to parse message data:', error)
+      return NextResponse.json({ error: 'Invalid message data' }, { status: 400 })
+    }
+
+    // Extract email and user IDs from various possible formats
+    const emailId = data.emailId || data.message?.emailId || data.historyId
+    const userId = data.userId || data.message?.userId || data.userEmail
 
     if (!emailId || !userId) {
-      console.error('Missing required data in decoded payload:', { emailId, userId })
+      console.error('Missing required data in decoded payload:', { emailId, userId, data })
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 })
     }
 
