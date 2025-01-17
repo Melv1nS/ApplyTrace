@@ -24,8 +24,9 @@ export async function GET(request: Request) {
         // Set up Gmail watch if we have a valid session with provider token
         if (session?.provider_token && session?.user?.id) {
             try {
+                console.log('Attempting to store token for user:', session.user.id)
                 // Store token in Supabase for testing
-                await supabase
+                const { error: upsertError } = await supabase
                     .from('email_sessions')
                     .upsert({
                         user_id: session.user.id,
@@ -36,11 +37,22 @@ export async function GET(request: Request) {
                         onConflict: 'user_id'
                     })
 
+                if (upsertError) {
+                    console.error('Error storing token:', upsertError)
+                } else {
+                    console.log('Token stored successfully')
+                }
+
                 await setupGmailWatch(session.provider_token, session.user.id)
             } catch (error) {
                 console.error('Error setting up Gmail watch:', error)
                 // Continue with redirect even if Gmail watch setup fails
             }
+        } else {
+            console.log('No provider token or user id in session:', {
+                hasToken: !!session?.provider_token,
+                hasUserId: !!session?.user?.id
+            })
         }
 
         // URL to redirect to after sign in process completes
