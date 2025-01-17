@@ -30,7 +30,10 @@ export async function GET(request: Request) {
                     .upsert({
                         user_id: session.user.id,
                         access_token: session.provider_token,
-                        created_at: new Date().toISOString()
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    }, {
+                        onConflict: 'user_id'
                     })
 
                 await setupGmailWatch(session.provider_token, session.user.id)
