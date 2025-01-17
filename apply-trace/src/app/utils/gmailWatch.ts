@@ -20,6 +20,21 @@ function logError(stage: string, error: unknown) {
   }))
 }
 
+async function getServiceAccountAuth() {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY) {
+    throw new Error('Missing service account credentials')
+  }
+
+  const auth = new google.auth.JWT({
+    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    key: process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/pubsub']
+  })
+
+  await auth.authorize()
+  return auth
+}
+
 export async function setupGmailWatch(accessToken: string, userId: string): Promise<WatchResponse> {
   try {
     if (!process.env.GOOGLE_CLOUD_PROJECT_ID || !process.env.PUBSUB_TOPIC_NAME) {
@@ -31,6 +46,11 @@ export async function setupGmailWatch(accessToken: string, userId: string): Prom
     }
 
     logDebug('SETUP_START', { userId })
+
+    // Get service account auth for Pub/Sub operations
+    const serviceAuth = await getServiceAccountAuth()
+
+    // Set up Gmail client with user's access token
     const oauth2Client = new google.auth.OAuth2()
     oauth2Client.setCredentials({
       access_token: accessToken
@@ -38,6 +58,23 @@ export async function setupGmailWatch(accessToken: string, userId: string): Prom
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
     const topicName = `projects/${process.env.GOOGLE_CLOUD_PROJECT_ID}/topics/${process.env.PUBSUB_TOPIC_NAME}`
+
+    // Initialize Pub/Sub with service account
+    const pubsub = google.pubsub({ version: 'v1', auth: serviceAuth })
+
+    // Verify topic exists or create it
+    try {
+      logDebug('VERIFY_TOPIC')
+      await pubsub.projects.topics.get({ topic: topicName })
+    } catch (error) {
+      if ((error as any)?.response?.status === 404) {
+        logDebug('CREATING_TOPIC')
+        await pubsub.projects.topics.create({ name: topicName })
+      } else {
+        throw error
+      }
+    }
+
     logDebug('TOPIC_CONFIG', { topicName })
 
     const response = await gmail.users.watch({
