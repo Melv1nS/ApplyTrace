@@ -1,7 +1,7 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
+import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
+import { gmail_v1 } from 'googleapis'
 import { JobStatus } from '@prisma/client'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
@@ -13,6 +13,23 @@ interface GeminiAnalysis {
   roleTitle: string;
   confidence: number;
 }
+
+interface GmailNotification {
+  emailAddress: string;
+  historyId: number;
+}
+
+// Create a Supabase client with the service role key
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+)
 
 async function analyzeWithGemini(subject: string, emailBody: string): Promise<GeminiAnalysis> {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -58,7 +75,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true })
     }
 
-    let data: any
+    let data: GmailNotification
     try {
       data = JSON.parse(decodedData)
     } catch (error) {
@@ -78,10 +95,9 @@ export async function POST(request: Request) {
     }
 
     // Get user session from email metadata using email address
-    const supabase = createRouteHandlerClient({ cookies })
     console.log('Looking up session for email:', emailAddress)
 
-    const { data: userSession, error: sessionError } = await supabase
+    const { data: userSession, error: sessionError } = await supabaseAdmin
       .from('email_sessions')
       .select('user_id, access_token, email')
       .eq('email', emailAddress)
@@ -94,7 +110,7 @@ export async function POST(request: Request) {
 
     if (!userSession) {
       // Double check if the session exists with a case-insensitive search
-      const { data: allSessions } = await supabase
+      const { data: allSessions } = await supabaseAdmin
         .from('email_sessions')
         .select('user_id, access_token, email')
 
@@ -121,12 +137,12 @@ export async function POST(request: Request) {
     // Get history list to find the new message
     const { data: history } = await gmail.users.history.list({
       userId: 'me',
-      startHistoryId: historyId,
+      startHistoryId: historyId.toString(),
       historyTypes: ['messageAdded']
     })
 
     // Process each new message in the history
-    const messagePromises = history.history?.[0]?.messagesAdded?.map(async (added) => {
+    const messagePromises = history.history?.[0]?.messagesAdded?.map(async (added: gmail_v1.Schema$HistoryMessageAdded) => {
       const messageId = added.message?.id
       if (!messageId) return
 
@@ -149,7 +165,7 @@ export async function POST(request: Request) {
 
       if (analysis.isJobRelated && analysis.confidence > 0.7) {
         // Check if we already have this email processed
-        const { data: existingJob } = await supabase
+        const { data: existingJob } = await supabaseAdmin
           .from('job_applications')
           .select('id')
           .eq('email_id', messageId)
@@ -163,7 +179,7 @@ export async function POST(request: Request) {
           })
 
           // Create new job application
-          await supabase.from('job_applications').insert({
+          await supabaseAdmin.from('job_applications').insert({
             userId: userSession.user_id,
             companyName: analysis.companyName,
             roleTitle: analysis.roleTitle,
@@ -180,14 +196,15 @@ export async function POST(request: Request) {
           confidence: analysis.confidence
         })
       }
-    }) || []
+    })
 
-    // Wait for all messages to be processed
-    await Promise.all(messagePromises)
+    if (messagePromises) {
+      await Promise.all(messagePromises)
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Webhook error:', error)
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+    console.error('Error processing webhook:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
