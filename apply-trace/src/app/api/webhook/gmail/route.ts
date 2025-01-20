@@ -36,18 +36,37 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
   const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
   const prompt = `Analyze this email for job application related content. Subject: "${subject}" Body: "${emailBody}"
-    Return a JSON object with the following fields:
+    Return a JSON object (without any markdown formatting or code blocks) with the following fields:
     - isJobRelated (boolean): is this email related to a job application?
     - type: either "APPLICATION", "REJECTION", or "OTHER"
     - companyName: the company name if found, or "Unknown"
     - roleTitle: the job title if found, or "Unknown"
     - confidence: number between 0 and 1 indicating confidence in this analysis
     
-    Focus on identifying application confirmations and rejection notices.`;
+    Focus on identifying application confirmations and rejection notices.
+    
+    IMPORTANT: Return ONLY the raw JSON object, no markdown formatting, no code blocks, no backticks.`;
 
   const result = await model.generateContent(prompt);
   const response = await result.response;
-  return JSON.parse(response.text());
+  const text = response.text().trim();
+
+  // Remove any markdown code block formatting if present
+  const jsonStr = text.replace(/^```json\n|\n```$/g, '').trim();
+
+  try {
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    console.error('Failed to parse Gemini response:', { text, jsonStr, error });
+    // Return a default analysis for non-job related emails
+    return {
+      isJobRelated: false,
+      type: 'OTHER',
+      companyName: 'Unknown',
+      roleTitle: 'Unknown',
+      confidence: 0
+    };
+  }
 }
 
 export async function POST(request: Request) {
