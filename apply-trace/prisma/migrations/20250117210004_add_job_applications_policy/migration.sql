@@ -1,3 +1,9 @@
+-- Enable UUID extension if not already enabled
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Set default UUID for id column
+ALTER TABLE "job_applications" ALTER COLUMN "id" SET DEFAULT uuid_generate_v4();
+
 -- Function to safely get auth.uid() or null
 CREATE OR REPLACE FUNCTION get_auth_uid() 
 RETURNS text AS $$
