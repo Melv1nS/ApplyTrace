@@ -29,6 +29,7 @@ model EmailSession {
   accessToken  String   @map("access_token")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+  lastHistoryId String? @map("last_history_id")
 
   @@map("email_sessions")
   @@index([userId])
