@@ -291,7 +291,7 @@ export async function POST(request: Request) {
           const { data: fullMessage } = await gmail.users.messages.get({
             userId: 'me',
             id: messageId,
-            format: 'metadata',
+            format: 'full',
             metadataHeaders: ['subject', 'from', 'to']
           })
           messageDetails = fullMessage
@@ -310,10 +310,33 @@ export async function POST(request: Request) {
         const from = headers.find(h => h?.name?.toLowerCase() === 'from')?.value || ''
         const to = headers.find(h => h?.name?.toLowerCase() === 'to')?.value || ''
 
-        // Use snippet instead of full body
-        const messageBody = messageDetails.snippet || ''
+        // Get full message body
+        let messageBody = ''
+        if (messageDetails.payload?.body?.data) {
+          // Decode base64 body
+          messageBody = Buffer.from(messageDetails.payload.body.data, 'base64').toString()
+        } else if (messageDetails.payload?.parts) {
+          // Handle multipart messages
+          for (const part of messageDetails.payload.parts) {
+            if (part.mimeType === 'text/plain' && part.body?.data) {
+              messageBody += Buffer.from(part.body.data, 'base64').toString()
+            }
+          }
+        }
 
-        console.log('Processing email:', { subject, messageId, from, to })
+        // Fallback to snippet if body extraction fails
+        if (!messageBody) {
+          console.log('Failed to extract full body, falling back to snippet')
+          messageBody = messageDetails.snippet || ''
+        }
+
+        console.log('Processing email:', {
+          subject,
+          messageId,
+          from,
+          to,
+          bodyLength: messageBody.length  // Log the length of the body for debugging
+        })
         const analysis = await analyzeWithGemini(subject, messageBody)
         console.log('Analysis result:', analysis)
 
