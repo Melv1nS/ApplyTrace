@@ -150,17 +150,21 @@ export async function POST(request: Request) {
       const { data: fullMessage } = await gmail.users.messages.get({
         userId: 'me',
         id: messageId,
-        format: 'full'
+        format: 'metadata',
+        metadataHeaders: ['subject', 'from', 'to']
       })
 
       // Extract email content
       const headers = fullMessage.payload?.headers || []
       const subject = headers.find(h => h?.name?.toLowerCase() === 'subject')?.value || ''
-      const messageBody = fullMessage.payload?.parts?.[0]?.body?.data || ''
-      const decodedBody = Buffer.from(messageBody, 'base64').toString('utf-8')
+      const from = headers.find(h => h?.name?.toLowerCase() === 'from')?.value || ''
+      const to = headers.find(h => h?.name?.toLowerCase() === 'to')?.value || ''
 
-      console.log('Processing email:', { subject, messageId })
-      const analysis = await analyzeWithGemini(subject, decodedBody)
+      // Use snippet instead of full body
+      const messageBody = fullMessage.snippet || ''
+
+      console.log('Processing email:', { subject, messageId, from, to })
+      const analysis = await analyzeWithGemini(subject, messageBody)
       console.log('Analysis result:', analysis)
 
       if (analysis.isJobRelated && analysis.confidence > 0.7) {
