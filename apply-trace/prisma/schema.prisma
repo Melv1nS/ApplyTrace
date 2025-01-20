@@ -15,7 +15,7 @@ model JobApplication {
   status       JobStatus @default(APPLIED)
   appliedDate  DateTime  @map("applied_date")
   updatedAt    DateTime  @updatedAt @map("updated_at")
-  emailId      String?   @map("email_id")
+  emailId      String?   @unique @map("email_id")
   notes        String?   @db.Text
 
   @@map("job_applications")
