@@ -31,34 +31,48 @@ const supabaseAdmin = createClient(
   }
 )
 
+// Simple in-memory rate limiting
+const rateLimiter = {
+  lastCallTime: 0,
+  minDelayMs: 1000, // Minimum 1 second between calls
+}
+
 async function analyzeWithGemini(subject: string, emailBody: string): Promise<GeminiAnalysis> {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-
-  const prompt = `Analyze this email for job application related content. Subject: "${subject}" Body: "${emailBody}"
-    Return a JSON object (without any markdown formatting or code blocks) with the following fields:
-    - isJobRelated (boolean): is this email related to a job application?
-    - type: either "APPLICATION", "REJECTION", or "OTHER"
-    - companyName: the company name if found, or "Unknown"
-    - roleTitle: the job title if found, or "Unknown"
-    - confidence: number between 0 and 1 indicating confidence in this analysis
-    
-    Focus on identifying application confirmations and rejection notices.
-    
-    IMPORTANT: Return ONLY the raw JSON object, no markdown formatting, no code blocks, no backticks.`;
-
-  const result = await model.generateContent(prompt);
-  const response = await result.response;
-  const text = response.text().trim();
-
-  // Remove any markdown code block formatting if present
-  const jsonStr = text.replace(/^```json\n|\n```$/g, '').trim();
+  // Rate limiting
+  const now = Date.now()
+  const timeSinceLastCall = now - rateLimiter.lastCallTime
+  if (timeSinceLastCall < rateLimiter.minDelayMs) {
+    await new Promise(resolve => setTimeout(resolve, rateLimiter.minDelayMs - timeSinceLastCall))
+  }
+  rateLimiter.lastCallTime = Date.now()
 
   try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+
+    const prompt = `Analyze this email for job application related content. Subject: "${subject}" Body: "${emailBody}"
+      Return a JSON object (without any markdown formatting or code blocks) with the following fields:
+      - isJobRelated (boolean): is this email related to a job application?
+      - type: either "APPLICATION", "REJECTION", or "OTHER"
+      - companyName: the company name if found, or "Unknown"
+      - roleTitle: the job title if found, or "Unknown"
+      - confidence: number between 0 and 1 indicating confidence in this analysis
+      
+      Focus on identifying application confirmations and rejection notices.
+      
+      IMPORTANT: Return ONLY the raw JSON object, no markdown formatting, no code blocks, no backticks.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text().trim();
+
+    // Remove any markdown code block formatting if present
+    const jsonStr = text.replace(/^```json\n|\n```$/g, '').trim();
+
     return JSON.parse(jsonStr);
   } catch (error) {
-    console.error('Failed to parse Gemini response:', { text, jsonStr, error });
-    // Return a default analysis for non-job related emails
+    console.error('Failed to analyze with Gemini:', error);
+    // Return a default analysis for errors
     return {
       isJobRelated: false,
       type: 'OTHER',
@@ -118,7 +132,7 @@ export async function POST(request: Request) {
 
     const { data: userSession, error: sessionError } = await supabaseAdmin
       .from('email_sessions')
-      .select('user_id, access_token, email')
+      .select('user_id, access_token, email, last_history_id')
       .eq('email', emailAddress)
       .single()
 
@@ -128,15 +142,14 @@ export async function POST(request: Request) {
     }
 
     if (!userSession) {
-      // Double check if the session exists with a case-insensitive search
-      const { data: allSessions } = await supabaseAdmin
-        .from('email_sessions')
-        .select('user_id, access_token, email')
-
-      console.log('All available sessions:', allSessions)
-
       console.error('No user session found for email:', emailAddress)
       return NextResponse.json({ error: 'User session not found' }, { status: 404 })
+    }
+
+    // Skip if we've already processed this history ID
+    if (userSession.last_history_id && parseInt(userSession.last_history_id) >= historyId) {
+      console.log('Skipping already processed history ID:', historyId)
+      return NextResponse.json({ success: true })
     }
 
     console.log('Found user session:', {
@@ -165,7 +178,19 @@ export async function POST(request: Request) {
       const messageId = added.message?.id
       if (!messageId) return
 
-      // Get full message details
+      // Skip if we've already processed this message
+      const { data: existingJob } = await supabaseAdmin
+        .from('job_applications')
+        .select('id')
+        .eq('email_id', messageId)
+        .single()
+
+      if (existingJob) {
+        console.log('Skipping already processed message:', messageId)
+        return
+      }
+
+      // Get message details
       const { data: fullMessage } = await gmail.users.messages.get({
         userId: 'me',
         id: messageId,
@@ -187,43 +212,36 @@ export async function POST(request: Request) {
       console.log('Analysis result:', analysis)
 
       if (analysis.isJobRelated && analysis.confidence > 0.7) {
-        // Check if we already have this email processed
-        const { data: existingJob } = await supabaseAdmin
-          .from('job_applications')
-          .select('id')
-          .eq('email_id', messageId)
-          .single()
+        console.log('Creating new job application:', {
+          companyName: analysis.companyName,
+          roleTitle: analysis.roleTitle,
+          status: analysis.type
+        })
 
-        if (!existingJob) {
-          console.log('Creating new job application:', {
-            companyName: analysis.companyName,
-            roleTitle: analysis.roleTitle,
-            status: analysis.type
-          })
-
-          // Create new job application
-          await supabaseAdmin.from('job_applications').insert({
-            userId: userSession.user_id,
-            companyName: analysis.companyName,
-            roleTitle: analysis.roleTitle,
-            status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
-            appliedDate: new Date().toISOString(),
-            emailId: messageId
-          })
-        } else {
-          console.log('Job application already exists for email:', messageId)
-        }
+        // Create new job application
+        await supabaseAdmin.from('job_applications').insert({
+          userId: userSession.user_id,
+          companyName: analysis.companyName,
+          roleTitle: analysis.roleTitle,
+          status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
+          appliedDate: new Date().toISOString(),
+          emailId: messageId
+        })
       } else {
         console.log('Email not job-related or low confidence:', {
           isJobRelated: analysis.isJobRelated,
           confidence: analysis.confidence
         })
       }
-    })
+    }) || []
 
-    if (messagePromises) {
-      await Promise.all(messagePromises)
-    }
+    await Promise.all(messagePromises)
+
+    // Update the last processed history ID
+    await supabaseAdmin
+      .from('email_sessions')
+      .update({ last_history_id: historyId.toString() })
+      .eq('user_id', userSession.user_id)
 
     return NextResponse.json({ success: true })
   } catch (error) {
