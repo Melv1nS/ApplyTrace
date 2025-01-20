@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
-import { gmail_v1 } from 'googleapis'
 import { JobStatus } from '@prisma/client'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
@@ -170,29 +169,60 @@ export async function POST(request: Request) {
     console.log('Fetching Gmail history...')
     const { data: history } = await gmail.users.history.list({
       userId: 'me',
-      startHistoryId: historyId.toString(),
-      historyTypes: ['messageAdded']
+      startHistoryId: historyId.toString()
     })
 
     console.log('Gmail history response:', {
       hasHistory: !!history,
       historyLength: history?.history?.length || 0,
-      firstHistoryMessages: history?.history?.[0]?.messagesAdded?.length || 0
+      historyDetails: history?.history?.map(h => ({
+        messages: h.messages?.length || 0,
+        messagesAdded: h.messagesAdded?.length || 0,
+        labelsAdded: h.labelsAdded?.length || 0,
+        labelsRemoved: h.labelsRemoved?.length || 0
+      }))
     })
 
-    if (!history?.history?.length) {
-      console.log('No history entries found')
+    // Process all messages in the history
+    const messageIds = new Set<string>()
+
+    // Add messages from history if any
+    if (history?.history?.length) {
+      history.history.forEach(historyEntry => {
+        // From messages
+        historyEntry.messages?.forEach(msg => {
+          if (msg.id) messageIds.add(msg.id)
+        })
+        // From messagesAdded
+        historyEntry.messagesAdded?.forEach(added => {
+          if (added.message?.id) messageIds.add(added.message.id)
+        })
+      })
+    }
+
+    // If no messages found in history, list recent messages
+    if (messageIds.size === 0) {
+      console.log('No messages in history, checking recent messages...')
+      const { data: messages } = await gmail.users.messages.list({
+        userId: 'me',
+        maxResults: 1,  // Just get the most recent message
+        q: 'newer_than:1h' // Only get messages from the last hour
+      })
+
+      messages?.messages?.forEach(msg => {
+        if (msg.id) messageIds.add(msg.id)
+      })
+    }
+
+    console.log('Found message IDs:', Array.from(messageIds))
+
+    if (messageIds.size === 0) {
+      console.log('No messages found to process')
       return NextResponse.json({ success: true })
     }
 
-    // Process each new message in the history
-    const messagePromises = history.history?.[0]?.messagesAdded?.map(async (added: gmail_v1.Schema$HistoryMessageAdded) => {
-      const messageId = added.message?.id
-      if (!messageId) {
-        console.log('Skipping message with no ID')
-        return
-      }
-
+    // Process each unique message
+    const messagePromises = Array.from(messageIds).map(async (messageId) => {
       console.log('Processing message:', messageId)
 
       // Skip if we've already processed this message
@@ -261,7 +291,7 @@ export async function POST(request: Request) {
       } catch (error) {
         console.error('Error processing message:', messageId, error)
       }
-    }) || []
+    })
 
     console.log('Processing', messagePromises.length, 'messages')
     await Promise.all(messagePromises.filter(Boolean))
