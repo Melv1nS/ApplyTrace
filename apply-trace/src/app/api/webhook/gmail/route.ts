@@ -18,6 +18,17 @@ interface GmailNotification {
   historyId: number;
 }
 
+// Add interface for Gmail API errors
+interface GmailApiError {
+  code: number;
+  message: string;
+  errors?: Array<{
+    message: string;
+    domain: string;
+    reason: string;
+  }>;
+}
+
 // Create a Supabase client with the service role key
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -247,36 +258,47 @@ export async function POST(request: Request) {
     const messagePromises = Array.from(messageIds).map(async (messageId) => {
       console.log('Processing message:', messageId)
 
-      // Skip if we've already processed this message
-      const { data: existingJob } = await supabaseAdmin
-        .from('job_applications')
-        .select('id')
-        .eq('email_id', messageId)
-        .single()
-
-      if (existingJob) {
-        console.log('Skipping already processed message:', messageId)
-        return
-      }
-
       try {
+        // Skip if we've already processed this message
+        const { data: existingJob } = await supabaseAdmin
+          .from('job_applications')
+          .select('id')
+          .eq('email_id', messageId)
+          .single()
+
+        if (existingJob) {
+          console.log('Skipping already processed message:', messageId)
+          return
+        }
+
         // Get message details
         console.log('Fetching message details for:', messageId)
-        const { data: fullMessage } = await gmail.users.messages.get({
-          userId: 'me',
-          id: messageId,
-          format: 'metadata',
-          metadataHeaders: ['subject', 'from', 'to']
-        })
+        let messageDetails
+        try {
+          const { data: fullMessage } = await gmail.users.messages.get({
+            userId: 'me',
+            id: messageId,
+            format: 'metadata',
+            metadataHeaders: ['subject', 'from', 'to']
+          })
+          messageDetails = fullMessage
+        } catch (error) {
+          const gmailError = error as GmailApiError
+          if (gmailError.code === 404) {
+            console.log('Message no longer exists:', messageId)
+            return
+          }
+          throw error
+        }
 
         // Extract email content
-        const headers = fullMessage.payload?.headers || []
+        const headers = messageDetails.payload?.headers || []
         const subject = headers.find(h => h?.name?.toLowerCase() === 'subject')?.value || ''
         const from = headers.find(h => h?.name?.toLowerCase() === 'from')?.value || ''
         const to = headers.find(h => h?.name?.toLowerCase() === 'to')?.value || ''
 
         // Use snippet instead of full body
-        const messageBody = fullMessage.snippet || ''
+        const messageBody = messageDetails.snippet || ''
 
         console.log('Processing email:', { subject, messageId, from, to })
         const analysis = await analyzeWithGemini(subject, messageBody)
