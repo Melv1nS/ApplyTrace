@@ -35,24 +35,37 @@ export default function HomePage() {
   useEffect(() => {
     // Check auth status
     const checkAuth = async () => {
+      console.log('Checking auth status...')
       const { data: { session } } = await supabase.auth.getSession()
+
       if (!session) {
+        console.log('No session found, redirecting to signin')
         router.push('/auth/signin')
         return
       }
 
+      console.log('Session found for user:', session.user.id)
+
       // Fetch initial jobs
-      const { data: initialJobs } = await supabase
+      console.log('Fetching initial jobs...')
+      const { data: initialJobs, error: fetchError } = await supabase
         .from('job_applications')
         .select('*')
         .eq('user_id', session.user.id)
         .order('updated_at', { ascending: false })
 
+      if (fetchError) {
+        console.error('Error fetching jobs:', fetchError)
+        return
+      }
+
       if (initialJobs) {
+        console.log('Initial jobs loaded:', initialJobs.length)
         setJobs(initialJobs)
       }
 
       // Subscribe to changes
+      console.log('Setting up real-time subscription...')
       const channel = supabase
         .channel('job_applications_changes')
         .on(
@@ -64,24 +77,33 @@ export default function HomePage() {
             filter: `user_id=eq.${session.user.id}`
           },
           async (payload) => {
-            console.log('Real-time update:', payload)
+            console.log('Real-time update received:', payload)
 
             // Refresh the entire list to ensure correct ordering
-            const { data: updatedJobs } = await supabase
+            const { data: updatedJobs, error: refreshError } = await supabase
               .from('job_applications')
               .select('*')
               .eq('user_id', session.user.id)
               .order('updated_at', { ascending: false })
 
+            if (refreshError) {
+              console.error('Error refreshing jobs:', refreshError)
+              return
+            }
+
             if (updatedJobs) {
+              console.log('Jobs list updated:', updatedJobs.length)
               setJobs(updatedJobs)
             }
           }
         )
-        .subscribe()
+        .subscribe((status) => {
+          console.log('Subscription status:', status)
+        })
 
       // Cleanup subscription
       return () => {
+        console.log('Cleaning up subscription')
         channel.unsubscribe()
       }
     }
