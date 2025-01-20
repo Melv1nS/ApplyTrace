@@ -167,16 +167,33 @@ export async function POST(request: Request) {
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
 
     // Get history list to find the new message
+    console.log('Fetching Gmail history...')
     const { data: history } = await gmail.users.history.list({
       userId: 'me',
       startHistoryId: historyId.toString(),
       historyTypes: ['messageAdded']
     })
 
+    console.log('Gmail history response:', {
+      hasHistory: !!history,
+      historyLength: history?.history?.length || 0,
+      firstHistoryMessages: history?.history?.[0]?.messagesAdded?.length || 0
+    })
+
+    if (!history?.history?.length) {
+      console.log('No history entries found')
+      return NextResponse.json({ success: true })
+    }
+
     // Process each new message in the history
     const messagePromises = history.history?.[0]?.messagesAdded?.map(async (added: gmail_v1.Schema$HistoryMessageAdded) => {
       const messageId = added.message?.id
-      if (!messageId) return
+      if (!messageId) {
+        console.log('Skipping message with no ID')
+        return
+      }
+
+      console.log('Processing message:', messageId)
 
       // Skip if we've already processed this message
       const { data: existingJob } = await supabaseAdmin
@@ -190,52 +207,65 @@ export async function POST(request: Request) {
         return
       }
 
-      // Get message details
-      const { data: fullMessage } = await gmail.users.messages.get({
-        userId: 'me',
-        id: messageId,
-        format: 'metadata',
-        metadataHeaders: ['subject', 'from', 'to']
-      })
-
-      // Extract email content
-      const headers = fullMessage.payload?.headers || []
-      const subject = headers.find(h => h?.name?.toLowerCase() === 'subject')?.value || ''
-      const from = headers.find(h => h?.name?.toLowerCase() === 'from')?.value || ''
-      const to = headers.find(h => h?.name?.toLowerCase() === 'to')?.value || ''
-
-      // Use snippet instead of full body
-      const messageBody = fullMessage.snippet || ''
-
-      console.log('Processing email:', { subject, messageId, from, to })
-      const analysis = await analyzeWithGemini(subject, messageBody)
-      console.log('Analysis result:', analysis)
-
-      if (analysis.isJobRelated && analysis.confidence > 0.7) {
-        console.log('Creating new job application:', {
-          companyName: analysis.companyName,
-          roleTitle: analysis.roleTitle,
-          status: analysis.type
+      try {
+        // Get message details
+        console.log('Fetching message details for:', messageId)
+        const { data: fullMessage } = await gmail.users.messages.get({
+          userId: 'me',
+          id: messageId,
+          format: 'metadata',
+          metadataHeaders: ['subject', 'from', 'to']
         })
 
-        // Create new job application
-        await supabaseAdmin.from('job_applications').insert({
-          userId: userSession.user_id,
-          companyName: analysis.companyName,
-          roleTitle: analysis.roleTitle,
-          status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
-          appliedDate: new Date().toISOString(),
-          emailId: messageId
-        })
-      } else {
-        console.log('Email not job-related or low confidence:', {
-          isJobRelated: analysis.isJobRelated,
-          confidence: analysis.confidence
-        })
+        // Extract email content
+        const headers = fullMessage.payload?.headers || []
+        const subject = headers.find(h => h?.name?.toLowerCase() === 'subject')?.value || ''
+        const from = headers.find(h => h?.name?.toLowerCase() === 'from')?.value || ''
+        const to = headers.find(h => h?.name?.toLowerCase() === 'to')?.value || ''
+
+        // Use snippet instead of full body
+        const messageBody = fullMessage.snippet || ''
+
+        console.log('Processing email:', { subject, messageId, from, to })
+        const analysis = await analyzeWithGemini(subject, messageBody)
+        console.log('Analysis result:', analysis)
+
+        if (analysis.isJobRelated && analysis.confidence > 0.7) {
+          console.log('Creating new job application:', {
+            companyName: analysis.companyName,
+            roleTitle: analysis.roleTitle,
+            status: analysis.type
+          })
+
+          // Create new job application
+          const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
+            userId: userSession.user_id,
+            companyName: analysis.companyName,
+            roleTitle: analysis.roleTitle,
+            status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
+            appliedDate: new Date().toISOString(),
+            emailId: messageId
+          })
+
+          if (insertError) {
+            console.error('Error creating job application:', insertError)
+          } else {
+            console.log('Successfully created job application')
+          }
+        } else {
+          console.log('Email not job-related or low confidence:', {
+            isJobRelated: analysis.isJobRelated,
+            confidence: analysis.confidence
+          })
+        }
+      } catch (error) {
+        console.error('Error processing message:', messageId, error)
       }
     }) || []
 
-    await Promise.all(messagePromises)
+    console.log('Processing', messagePromises.length, 'messages')
+    await Promise.all(messagePromises.filter(Boolean))
+    console.log('Finished processing all messages')
 
     // Update the last processed history ID
     await supabaseAdmin
