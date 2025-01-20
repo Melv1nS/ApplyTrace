@@ -313,12 +313,13 @@ export async function POST(request: Request) {
 
           // Create new job application
           const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
-            userId: userSession.user_id,
-            companyName: analysis.companyName,
-            roleTitle: analysis.roleTitle,
+            user_id: userSession.user_id,
+            company_name: analysis.companyName,
+            role_title: analysis.roleTitle,
             status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
-            appliedDate: new Date().toISOString(),
-            emailId: messageId
+            applied_date: new Date().toISOString(),
+            email_id: messageId,
+            updated_at: new Date().toISOString()
           })
 
           if (insertError) {
