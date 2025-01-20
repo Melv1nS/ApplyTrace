@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
 import { JobStatus } from '@prisma/client'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import crypto from 'crypto'
 
 // Add interface for Gemini response
 interface GeminiAnalysis {
@@ -349,6 +350,7 @@ export async function POST(request: Request) {
 
           // Create new job application
           const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
+            id: crypto.randomUUID(),  // Explicitly set UUID
             user_id: session.user_id,
             company_name: analysis.companyName,
             role_title: analysis.roleTitle,
