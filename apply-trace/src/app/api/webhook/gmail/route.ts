@@ -206,12 +206,34 @@ export async function POST(request: Request) {
       const { data: messages } = await gmail.users.messages.list({
         userId: 'me',
         maxResults: 1,  // Just get the most recent message
-        q: 'newer_than:1h' // Only get messages from the last hour
+        labelIds: ['INBOX']  // Only get messages from inbox
       })
 
-      messages?.messages?.forEach(msg => {
-        if (msg.id) messageIds.add(msg.id)
-      })
+      if (messages?.messages?.[0]?.id) {
+        const messageId = messages.messages[0].id
+        const { data: messageDetails } = await gmail.users.messages.get({
+          userId: 'me',
+          id: messageId,
+          format: 'metadata',
+          metadataHeaders: ['subject', 'from', 'to', 'date']
+        })
+
+        if (messageDetails?.internalDate) {
+          // Check if message is recent (within last hour)
+          const messageDate = new Date(parseInt(messageDetails.internalDate))
+          const isRecent = (Date.now() - messageDate.getTime()) < 60 * 60 * 1000 // 1 hour in milliseconds
+
+          if (isRecent) {
+            console.log('Found recent message:', messageId)
+            messageIds.add(messageId)
+          } else {
+            console.log('Most recent message is too old:', {
+              messageId: messageId,
+              date: messageDate
+            })
+          }
+        }
+      }
     }
 
     console.log('Found message IDs:', Array.from(messageIds))
