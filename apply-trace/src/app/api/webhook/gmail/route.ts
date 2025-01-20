@@ -140,38 +140,51 @@ export async function POST(request: Request) {
     // Get user session from email metadata using email address
     console.log('Looking up session for email:', emailAddress)
 
-    const { data: userSession, error: sessionError } = await supabaseAdmin
+    const { data: session, error: findError } = await supabaseAdmin
       .from('email_sessions')
-      .select('user_id, access_token, email, last_history_id')
-      .eq('email', emailAddress)
-      .single()
+      .select('*')
+      .eq('email', emailAddress.toLowerCase())
+      .single();
 
-    if (sessionError) {
-      console.error('Error fetching user session:', sessionError)
-      return NextResponse.json({ error: 'Error fetching user session' }, { status: 500 })
+    if (findError) {
+      // Handle the specific "no rows" error case
+      if (findError.code === 'PGRST116') {
+        console.log(`No session found for email ${emailAddress}. User needs to sign in again.`);
+        return NextResponse.json({
+          success: false,
+          error: 'No session found for this email. Please sign in through Google to create a session.'
+        }, { status: 404 });
+      }
+
+      // Handle other errors
+      console.error('Error fetching user session:', findError);
+      return NextResponse.json({ success: false, error: findError }, { status: 500 });
     }
 
-    if (!userSession) {
-      console.error('No user session found for email:', emailAddress)
-      return NextResponse.json({ error: 'User session not found' }, { status: 404 })
+    if (!session) {
+      console.log('No session data returned even though query succeeded');
+      return NextResponse.json({
+        success: false,
+        error: 'Session not found'
+      }, { status: 404 });
     }
 
     // Skip if we've already processed this history ID
-    if (userSession.last_history_id && parseInt(userSession.last_history_id) >= historyId) {
+    if (session.last_history_id && parseInt(session.last_history_id) >= historyId) {
       console.log('Skipping already processed history ID:', historyId)
       return NextResponse.json({ success: true })
     }
 
     console.log('Found user session:', {
-      userId: userSession.user_id,
-      hasAccessToken: !!userSession.access_token,
-      email: userSession.email
+      userId: session.user_id,
+      hasAccessToken: !!session.access_token,
+      email: session.email
     })
 
     // Initialize Gmail API client
     const oauth2Client = new google.auth.OAuth2()
     oauth2Client.setCredentials({
-      access_token: userSession.access_token
+      access_token: session.access_token
     })
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
@@ -313,13 +326,13 @@ export async function POST(request: Request) {
 
           // Create new job application
           const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
-            user_id: userSession.user_id,
+            user_id: session.user_id,
             company_name: analysis.companyName,
             role_title: analysis.roleTitle,
             status: analysis.type === 'REJECTION' ? JobStatus.REJECTED : JobStatus.APPLIED,
             applied_date: new Date().toISOString(),
-            email_id: messageId,
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            email_id: messageId
           })
 
           if (insertError) {
@@ -346,7 +359,7 @@ export async function POST(request: Request) {
     await supabaseAdmin
       .from('email_sessions')
       .update({ last_history_id: historyId.toString() })
-      .eq('user_id', userSession.user_id)
+      .eq('user_id', session.user_id)
 
     return NextResponse.json({ success: true })
   } catch (error) {
