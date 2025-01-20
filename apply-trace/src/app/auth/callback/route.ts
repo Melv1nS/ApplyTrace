@@ -1,8 +1,21 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { setupGmailWatch } from '@/app/utils/gmailWatch'
 import { google } from 'googleapis'
+
+// Create a Supabase client with the service role key for admin operations
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false
+        }
+    }
+)
 
 async function getUserEmail(accessToken: string): Promise<string> {
     const oauth2Client = new google.auth.OAuth2()
@@ -16,6 +29,13 @@ async function getUserEmail(accessToken: string): Promise<string> {
     })
 
     return profile.emailAddress || ''
+}
+
+interface PostgrestError {
+    message: string;
+    details?: string | null;
+    hint?: string | null;
+    code: string;
 }
 
 export async function GET(request: Request) {
@@ -64,7 +84,7 @@ export async function GET(request: Request) {
 
                 // First try to find existing session
                 console.log('Checking for existing session')
-                const { data: existingSession, error: findError } = await supabase
+                const { data: existingSession, error: findError } = await supabaseAdmin
                     .from('email_sessions')
                     .select('*')
                     .eq('user_id', session.user.id)
@@ -94,7 +114,7 @@ export async function GET(request: Request) {
                 let upsertError
                 if (existingSession) {
                     console.log('Updating existing session:', existingSession.id)
-                    const { error, data } = await supabase
+                    const { error, data } = await supabaseAdmin
                         .from('email_sessions')
                         .update(sessionData)
                         .eq('id', existingSession.id)
@@ -108,7 +128,7 @@ export async function GET(request: Request) {
                         id: crypto.randomUUID(),
                         created_at: new Date().toISOString()
                     }
-                    const { error, data } = await supabase
+                    const { error, data } = await supabaseAdmin
                         .from('email_sessions')
                         .insert(newSession)
                         .select()
@@ -128,7 +148,7 @@ export async function GET(request: Request) {
 
                 // Verify the session was stored
                 console.log('Verifying session storage')
-                const { data: verifySession, error: verifyError } = await supabase
+                const { data: verifySession, error: verifyError } = await supabaseAdmin
                     .from('email_sessions')
                     .select('*')
                     .eq('email', userEmail.toLowerCase())
@@ -154,9 +174,9 @@ export async function GET(request: Request) {
 
             } catch (error) {
                 console.error('Error in callback setup:', {
-                    error,
-                    message: error.message,
-                    stack: error.stack
+                    error: error as PostgrestError,
+                    message: error instanceof Error ? error.message : 'Unknown error',
+                    stack: error instanceof Error ? error.stack : undefined
                 })
                 // Continue with redirect even if setup fails
             }
@@ -172,9 +192,9 @@ export async function GET(request: Request) {
         return NextResponse.redirect(new URL('/', requestUrl.origin))
     } catch (error) {
         console.error('Unexpected error in callback:', {
-            error,
-            message: error.message,
-            stack: error.stack
+            error: error as PostgrestError,
+            message: error instanceof Error ? error.message : 'Unknown error',
+            stack: error instanceof Error ? error.stack : undefined
         })
         return NextResponse.redirect(new URL('/auth/signin?error=unknown', request.url))
     }
