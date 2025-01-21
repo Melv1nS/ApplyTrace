@@ -46,6 +46,14 @@ const supabaseAdmin = createClient(
 const rateLimiter = {
   lastCallTime: 0,
   minDelayMs: 1000, // Minimum 1 second between calls
+  retryCount: 0,
+  maxRetries: 3,
+  getBackoffDelay() {
+    return Math.min(1000 * Math.pow(2, this.retryCount), 10000); // Max 10 second delay
+  },
+  reset() {
+    this.retryCount = 0;
+  }
 }
 
 // Add OAuth2 config
@@ -69,15 +77,19 @@ async function refreshAccessToken(refreshToken: string) {
 }
 
 async function analyzeWithGemini(subject: string, emailBody: string): Promise<GeminiAnalysis> {
-  // Rate limiting
-  const now = Date.now()
-  const timeSinceLastCall = now - rateLimiter.lastCallTime
-  if (timeSinceLastCall < rateLimiter.minDelayMs) {
-    await new Promise(resolve => setTimeout(resolve, rateLimiter.minDelayMs - timeSinceLastCall))
-  }
-  rateLimiter.lastCallTime = Date.now()
-
   try {
+    // Rate limiting with exponential backoff
+    const now = Date.now();
+    const timeSinceLastCall = now - rateLimiter.lastCallTime;
+    const backoffDelay = rateLimiter.getBackoffDelay();
+    const waitTime = Math.max(backoffDelay - timeSinceLastCall, 0);
+
+    if (waitTime > 0) {
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+
+    rateLimiter.lastCallTime = Date.now();
+
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
     const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
@@ -97,11 +109,19 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
     const response = await result.response;
     const text = response.text().trim();
 
+    // Reset retry count on success
+    rateLimiter.reset();
+
     // Remove any markdown code block formatting if present
     const jsonStr = text.replace(/^```json\n|\n```$/g, '').trim();
-
     return JSON.parse(jsonStr);
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.status === 429 && rateLimiter.retryCount < rateLimiter.maxRetries) {
+      rateLimiter.retryCount++;
+      console.log(`Rate limited, attempt ${rateLimiter.retryCount}/${rateLimiter.maxRetries}. Retrying in ${rateLimiter.getBackoffDelay()}ms`);
+      return analyzeWithGemini(subject, emailBody);
+    }
+
     console.error('Failed to analyze with Gemini:', error);
     // Return a default analysis for errors
     return {
