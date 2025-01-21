@@ -49,128 +49,144 @@ export default function HomePage() {
 
       // Fetch initial jobs
       console.log('Fetching initial jobs...')
-      const { data: initialJobs, error: fetchError } = await supabase
-        .from('job_applications')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .order('updated_at', { ascending: false })
+      try {
+        const { data: initialJobs, error: fetchError } = await supabase
+          .from('job_applications')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('updated_at', { ascending: false })
 
-      if (fetchError) {
-        console.error('Error fetching jobs:', fetchError)
-        return
-      }
+        if (fetchError) {
+          console.error('Error fetching jobs:', fetchError)
+          return
+        }
 
-      if (initialJobs) {
-        console.log('Initial jobs loaded:', initialJobs.length)
-        setJobs(initialJobs)
-      }
+        console.log('Initial jobs fetch response:', {
+          success: true,
+          jobsCount: initialJobs?.length ?? 0,
+          firstJob: initialJobs?.[0]
+        })
 
-      // Subscribe to changes
-      console.log('Setting up real-time subscription...', {
-        userId: session.user.id,
-        channelName: `realtime:job_applications:${session.user.id}`
-      })
+        if (initialJobs) {
+          console.log('Initial jobs loaded:', initialJobs.length)
+          setJobs(initialJobs)
+        }
 
-      const channel = supabase
-        .channel(`realtime:job_applications:${session.user.id}`)
-        .on(
-          'postgres_changes',
-          {
+        // Subscribe to changes
+        console.log('Setting up real-time subscription...', {
+          userId: session.user.id,
+          channelName: `realtime:job_applications:${session.user.id}`,
+          config: {
             event: '*',
             schema: 'public',
             table: 'job_applications',
-            filter: `user_id=eq.${session.user.id}`  // Match the RLS policy
-          },
-          (payload) => {
-            console.log('Database change received:', {
-              eventType: payload.eventType,
-              new: payload.new,
-              old: payload.old,
-              table: payload.table,
-              schema: payload.schema,
+            filter: `user_id=eq.${session.user.id}`
+          }
+        })
+
+        const channel = supabase
+          .channel(`realtime:job_applications:${session.user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'job_applications',
+              filter: `user_id=eq.${session.user.id}`  // Match the RLS policy
+            },
+            (payload) => {
+              console.log('Database change received:', {
+                eventType: payload.eventType,
+                new: payload.new,
+                old: payload.old,
+                table: payload.table,
+                schema: payload.schema,
+                timestamp: new Date().toISOString(),
+                userId: session.user.id
+              })
+
+              // Check if this change is for the current user
+              const jobData = (payload.new || payload.old) as JobApplication | undefined
+              if (!jobData || jobData.user_id !== session.user.id) {
+                console.log('Ignoring change for different user:', jobData?.user_id)
+                return
+              }
+
+              // Handle the change based on event type
+              if (payload.eventType === 'INSERT') {
+                console.log('Handling INSERT:', {
+                  newJob: payload.new,
+                  currentJobsCount: jobs.length
+                })
+                setJobs(currentJobs => {
+                  const newJobs = [payload.new as JobApplication, ...currentJobs];
+                  console.log('Updated jobs after INSERT:', {
+                    newJobsCount: newJobs.length,
+                    firstJob: newJobs[0]
+                  });
+                  return newJobs;
+                })
+              } else if (payload.eventType === 'UPDATE') {
+                console.log('Handling UPDATE:', {
+                  oldJob: payload.old,
+                  newJob: payload.new,
+                  currentJobsCount: jobs.length
+                })
+                setJobs(currentJobs => {
+                  const updatedJobs = currentJobs.map(job =>
+                    job.id === payload.new.id ? payload.new as JobApplication : job
+                  );
+                  console.log('Updated jobs after UPDATE:', {
+                    updatedJobsCount: updatedJobs.length,
+                    updatedJob: payload.new
+                  });
+                  return updatedJobs;
+                })
+              } else if (payload.eventType === 'DELETE') {
+                console.log('Handling DELETE:', {
+                  oldJob: payload.old,
+                  currentJobsCount: jobs.length
+                })
+                setJobs(currentJobs => {
+                  const filteredJobs = currentJobs.filter(job => job.id !== payload.old.id);
+                  console.log('Updated jobs after DELETE:', {
+                    newJobsCount: filteredJobs.length,
+                    deletedJobId: payload.old.id
+                  });
+                  return filteredJobs;
+                })
+              }
+            }
+          )
+          .subscribe((status, err) => {
+            console.log('Subscription status changed:', {
+              status,
+              error: err,
               timestamp: new Date().toISOString(),
-              userId: session.user.id
+              channelState: channel.state
             })
 
-            // Check if this change is for the current user
-            const jobData = (payload.new || payload.old) as JobApplication | undefined
-            if (!jobData || jobData.user_id !== session.user.id) {
-              console.log('Ignoring change for different user:', jobData?.user_id)
-              return
+            if (err) {
+              console.error('Subscription error:', err)
             }
-
-            // Handle the change based on event type
-            if (payload.eventType === 'INSERT') {
-              console.log('Handling INSERT:', {
-                newJob: payload.new,
-                currentJobsCount: jobs.length
-              })
-              setJobs(currentJobs => {
-                const newJobs = [payload.new as JobApplication, ...currentJobs];
-                console.log('Updated jobs after INSERT:', {
-                  newJobsCount: newJobs.length,
-                  firstJob: newJobs[0]
-                });
-                return newJobs;
-              })
-            } else if (payload.eventType === 'UPDATE') {
-              console.log('Handling UPDATE:', {
-                oldJob: payload.old,
-                newJob: payload.new,
-                currentJobsCount: jobs.length
-              })
-              setJobs(currentJobs => {
-                const updatedJobs = currentJobs.map(job =>
-                  job.id === payload.new.id ? payload.new as JobApplication : job
-                );
-                console.log('Updated jobs after UPDATE:', {
-                  updatedJobsCount: updatedJobs.length,
-                  updatedJob: payload.new
-                });
-                return updatedJobs;
-              })
-            } else if (payload.eventType === 'DELETE') {
-              console.log('Handling DELETE:', {
-                oldJob: payload.old,
-                currentJobsCount: jobs.length
-              })
-              setJobs(currentJobs => {
-                const filteredJobs = currentJobs.filter(job => job.id !== payload.old.id);
-                console.log('Updated jobs after DELETE:', {
-                  newJobsCount: filteredJobs.length,
-                  deletedJobId: payload.old.id
-                });
-                return filteredJobs;
-              })
-            }
-          }
-        )
-        .subscribe((status, err) => {
-          console.log('Subscription status changed:', {
-            status,
-            error: err,
-            timestamp: new Date().toISOString(),
-            channelState: channel.state
           })
 
-          if (err) {
-            console.error('Subscription error:', err)
-          }
-        })
+        // Log channel state periodically
+        const intervalId = setInterval(() => {
+          console.log('Channel state:', {
+            state: channel.state,
+            timestamp: new Date().toISOString()
+          })
+        }, 5000)
 
-      // Log channel state periodically
-      const intervalId = setInterval(() => {
-        console.log('Channel state:', {
-          state: channel.state,
-          timestamp: new Date().toISOString()
-        })
-      }, 5000)
-
-      // Cleanup subscription and interval
-      return () => {
-        console.log('Cleaning up subscription and interval')
-        clearInterval(intervalId)
-        channel.unsubscribe()
+        // Cleanup subscription and interval
+        return () => {
+          console.log('Cleaning up subscription and interval')
+          clearInterval(intervalId)
+          channel.unsubscribe()
+        }
+      } catch (error) {
+        console.error('Error fetching initial jobs:', error)
       }
     }
 
