@@ -37,7 +37,17 @@ export default function HomePage() {
     // Check auth status
     const checkAuth = async () => {
       console.log('Checking auth status...')
-      const { data: { session } } = await supabase.auth.getSession()
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+
+      if (sessionError) {
+        console.error('Session error:', {
+          error: sessionError,
+          message: sessionError.message,
+          status: sessionError.status
+        })
+        router.push('/auth/signin')
+        return
+      }
 
       if (!session) {
         console.log('No session found, redirecting to signin')
@@ -45,11 +55,27 @@ export default function HomePage() {
         return
       }
 
-      console.log('Session found for user:', session.user.id)
+      console.log('Session found:', {
+        userId: session.user.id,
+        email: session.user.email,
+        hasAccessToken: !!session.access_token,
+        expiresAt: session.expires_at
+      })
 
       // Fetch initial jobs
       console.log('Fetching initial jobs...')
       try {
+        // Test authentication
+        const { data: user, error: userError } = await supabase.auth.getUser()
+        if (userError) {
+          console.error('Error getting user:', userError)
+          return
+        }
+        console.log('Authenticated as user:', {
+          id: user.user?.id,
+          email: user.user?.email
+        })
+
         const { data: initialJobs, error: fetchError } = await supabase
           .from('job_applications')
           .select('*')
@@ -57,7 +83,13 @@ export default function HomePage() {
           .order('updated_at', { ascending: false })
 
         if (fetchError) {
-          console.error('Error fetching jobs:', fetchError)
+          console.error('Error fetching jobs:', {
+            error: fetchError,
+            code: fetchError.code,
+            details: fetchError.details,
+            hint: fetchError.hint,
+            message: fetchError.message
+          })
           return
         }
 
