@@ -35,6 +35,9 @@ export default function HomePage() {
 
   const handleDelete = async (jobId: string) => {
     try {
+      // Optimistically update UI
+      setJobs(currentJobs => currentJobs.filter(job => job.id !== jobId))
+
       const { error } = await supabase
         .from('job_applications')
         .delete()
@@ -42,11 +45,17 @@ export default function HomePage() {
 
       if (error) {
         console.error('Error deleting job:', error)
-        return
-      }
+        // Revert optimistic update on error
+        const { data } = await supabase
+          .from('job_applications')
+          .select('*')
+          .eq('id', jobId)
+          .single()
 
-      // Note: We don't need to update the UI state manually since the real-time subscription
-      // will handle that for us when the database change occurs
+        if (data) {
+          setJobs(currentJobs => [...currentJobs, data])
+        }
+      }
     } catch (error) {
       console.error('Error deleting job:', error)
     }
