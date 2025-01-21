@@ -20,6 +20,7 @@ type JobStatus = keyof typeof statusMap
 
 interface JobApplication {
   id: string
+  user_id: string
   company_name: string
   role_title: string
   status: JobStatus
@@ -65,45 +66,78 @@ export default function HomePage() {
       }
 
       // Subscribe to changes
-      console.log('Setting up real-time subscription...')
+      console.log('Setting up real-time subscription...', {
+        userId: session.user.id,
+        channelName: `realtime:job_applications:${session.user.id}`
+      })
+
       const channel = supabase
-        .channel('job_applications_changes')
+        .channel(`realtime:job_applications:${session.user.id}`)
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
             table: 'job_applications',
-            filter: `user_id=eq.${session.user.id}`
+            filter: `user_id=eq.${session.user.id}`  // Match the RLS policy
           },
-          async (payload) => {
-            console.log('Real-time update received:', payload)
+          (payload) => {
+            console.log('Database change received:', {
+              eventType: payload.eventType,
+              new: payload.new,
+              old: payload.old,
+              table: payload.table,
+              schema: payload.schema,
+              timestamp: new Date().toISOString(),
+              userId: session.user.id
+            })
 
-            // Refresh the entire list to ensure correct ordering
-            const { data: updatedJobs, error: refreshError } = await supabase
-              .from('job_applications')
-              .select('*')
-              .eq('user_id', session.user.id)
-              .order('updated_at', { ascending: false })
-
-            if (refreshError) {
-              console.error('Error refreshing jobs:', refreshError)
+            // Check if this change is for the current user
+            const jobData = (payload.new || payload.old) as JobApplication | undefined
+            if (!jobData || jobData.user_id !== session.user.id) {
+              console.log('Ignoring change for different user:', jobData?.user_id)
               return
             }
 
-            if (updatedJobs) {
-              console.log('Jobs list updated:', updatedJobs.length)
-              setJobs(updatedJobs)
+            // Handle the change based on event type
+            if (payload.eventType === 'INSERT') {
+              console.log('Handling INSERT')
+              setJobs(currentJobs => [payload.new as JobApplication, ...currentJobs])
+            } else if (payload.eventType === 'UPDATE') {
+              console.log('Handling UPDATE')
+              setJobs(currentJobs =>
+                currentJobs.map(job =>
+                  job.id === payload.new.id ? payload.new as JobApplication : job
+                )
+              )
+            } else if (payload.eventType === 'DELETE') {
+              console.log('Handling DELETE')
+              setJobs(currentJobs =>
+                currentJobs.filter(job => job.id !== payload.old.id)
+              )
             }
           }
         )
-        .subscribe((status) => {
-          console.log('Subscription status:', status)
+        .subscribe((status, err) => {
+          console.log('Subscription status changed:', {
+            status,
+            error: err,
+            timestamp: new Date().toISOString()
+          })
         })
 
-      // Cleanup subscription
+      // Log channel state periodically
+      const intervalId = setInterval(() => {
+        console.log('Channel state:', {
+          state: channel.state,
+          timestamp: new Date().toISOString()
+        })
+      }, 5000)
+
+      // Cleanup subscription and interval
       return () => {
-        console.log('Cleaning up subscription')
+        console.log('Cleaning up subscription and interval')
+        clearInterval(intervalId)
         channel.unsubscribe()
       }
     }
