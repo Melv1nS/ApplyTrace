@@ -7,33 +7,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model JobApplication {
-  id           String    @id @default(uuid())
-  userId       String    @map("user_id")
-  companyName  String    @map("company_name")
-  roleTitle    String    @map("role_title")
-  status       JobStatus @default(APPLIED)
-  appliedDate  DateTime  @map("applied_date")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  emailId      String?   @unique @map("email_id")
-  notes        String?   @db.Text
-
-  @@map("job_applications")
-  @@index([userId])
-}
-
 model EmailSession {
-  id           String   @id @default(uuid())
-  userId       String   @unique @map("user_id")
-  email        String   @unique
-  accessToken  String   @map("access_token")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  lastHistoryId String? @map("last_history_id")
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  email         String   @unique
+  accessToken   String   @map("access_token")
+  refreshToken  String   @map("refresh_token")
+  lastHistoryId String?  @map("last_history_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("email_sessions")
-  @@index([userId])
-  @@index([email])
+}
+
+model JobApplication {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  companyName String   @map("company_name")
+  roleTitle   String   @map("role_title")
+  appliedDate DateTime @map("applied_date")
+  emailId     String   @unique @map("email_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("job_applications")
 }
 
 enum JobStatus {

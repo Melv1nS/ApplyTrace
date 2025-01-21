@@ -101,6 +101,7 @@ export async function GET(request: Request) {
                     user_id: session.user.id,
                     email: userEmail.toLowerCase(),
                     access_token: session.provider_token,
+                    refresh_token: session.provider_refresh_token,
                     updated_at: new Date().toISOString()
                 }
 

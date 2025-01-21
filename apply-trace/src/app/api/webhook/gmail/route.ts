@@ -48,6 +48,26 @@ const rateLimiter = {
   minDelayMs: 1000, // Minimum 1 second between calls
 }
 
+// Add OAuth2 config
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+)
+
+async function refreshAccessToken(refreshToken: string) {
+  try {
+    oauth2Client.setCredentials({
+      refresh_token: refreshToken
+    })
+    const { credentials } = await oauth2Client.refreshAccessToken()
+    return credentials.access_token
+  } catch (error) {
+    console.error('Error refreshing access token:', error)
+    throw error
+  }
+}
+
 async function analyzeWithGemini(subject: string, emailBody: string): Promise<GeminiAnalysis> {
   // Rate limiting
   const now = Date.now()
@@ -182,20 +202,55 @@ export async function POST(request: Request) {
       email: session.email
     })
 
-    // Initialize Gmail API client
+    // Initialize Gmail API client with token refresh handling
     const oauth2Client = new google.auth.OAuth2()
     oauth2Client.setCredentials({
-      access_token: session.access_token
+      access_token: session.access_token,
+      refresh_token: session.refresh_token
     })
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
 
+    // Wrap Gmail API calls in a retry function
+    async function callGmailApi<T>(apiCall: () => Promise<T>): Promise<T> {
+      try {
+        return await apiCall()
+      } catch (error) {
+        const gmailError = error as GmailApiError
+        if (gmailError.code === 401) {
+          console.log('Access token expired, refreshing...')
+          const newAccessToken = await refreshAccessToken(session.refresh_token)
+
+          // Update the session with new access token
+          await supabaseAdmin
+            .from('email_sessions')
+            .update({
+              access_token: newAccessToken,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', session.id)
+
+          // Update oauth client with new token
+          oauth2Client.setCredentials({
+            access_token: newAccessToken,
+            refresh_token: session.refresh_token
+          })
+
+          // Retry the API call
+          return await apiCall()
+        }
+        throw error
+      }
+    }
+
     // Get history list to find the new message
     console.log('Fetching Gmail history...')
-    const { data: history } = await gmail.users.history.list({
-      userId: 'me',
-      startHistoryId: historyId.toString()
-    })
+    const { data: history } = await callGmailApi(() =>
+      gmail.users.history.list({
+        userId: 'me',
+        startHistoryId: historyId.toString()
+      })
+    )
 
     console.log('Gmail history response:', {
       hasHistory: !!history,
@@ -289,12 +344,14 @@ export async function POST(request: Request) {
         console.log('Fetching message details for:', messageId)
         let messageDetails
         try {
-          const { data: fullMessage } = await gmail.users.messages.get({
-            userId: 'me',
-            id: messageId,
-            format: 'full',
-            metadataHeaders: ['subject', 'from', 'to']
-          })
+          const { data: fullMessage } = await callGmailApi(() =>
+            gmail.users.messages.get({
+              userId: 'me',
+              id: messageId,
+              format: 'full',
+              metadataHeaders: ['subject', 'from', 'to']
+            })
+          )
           messageDetails = fullMessage
         } catch (error) {
           const gmailError = error as GmailApiError
