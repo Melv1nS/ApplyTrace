@@ -101,20 +101,47 @@ export default function HomePage() {
 
             // Handle the change based on event type
             if (payload.eventType === 'INSERT') {
-              console.log('Handling INSERT')
-              setJobs(currentJobs => [payload.new as JobApplication, ...currentJobs])
+              console.log('Handling INSERT:', {
+                newJob: payload.new,
+                currentJobsCount: jobs.length
+              })
+              setJobs(currentJobs => {
+                const newJobs = [payload.new as JobApplication, ...currentJobs];
+                console.log('Updated jobs after INSERT:', {
+                  newJobsCount: newJobs.length,
+                  firstJob: newJobs[0]
+                });
+                return newJobs;
+              })
             } else if (payload.eventType === 'UPDATE') {
-              console.log('Handling UPDATE')
-              setJobs(currentJobs =>
-                currentJobs.map(job =>
+              console.log('Handling UPDATE:', {
+                oldJob: payload.old,
+                newJob: payload.new,
+                currentJobsCount: jobs.length
+              })
+              setJobs(currentJobs => {
+                const updatedJobs = currentJobs.map(job =>
                   job.id === payload.new.id ? payload.new as JobApplication : job
-                )
-              )
+                );
+                console.log('Updated jobs after UPDATE:', {
+                  updatedJobsCount: updatedJobs.length,
+                  updatedJob: payload.new
+                });
+                return updatedJobs;
+              })
             } else if (payload.eventType === 'DELETE') {
-              console.log('Handling DELETE')
-              setJobs(currentJobs =>
-                currentJobs.filter(job => job.id !== payload.old.id)
-              )
+              console.log('Handling DELETE:', {
+                oldJob: payload.old,
+                currentJobsCount: jobs.length
+              })
+              setJobs(currentJobs => {
+                const filteredJobs = currentJobs.filter(job => job.id !== payload.old.id);
+                console.log('Updated jobs after DELETE:', {
+                  newJobsCount: filteredJobs.length,
+                  deletedJobId: payload.old.id
+                });
+                return filteredJobs;
+              })
             }
           }
         )
@@ -122,8 +149,13 @@ export default function HomePage() {
           console.log('Subscription status changed:', {
             status,
             error: err,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            channelState: channel.state
           })
+
+          if (err) {
+            console.error('Subscription error:', err)
+          }
         })
 
       // Log channel state periodically

@@ -36,8 +36,6 @@ const columns = {
 } as const
 
 export default function JobBoard({ jobs }: { jobs: Job[] }) {
-    const [jobItems, setJobItems] = useState(jobs)
-
     return (
         <div className="flex gap-4 overflow-x-auto pb-4">
             {Object.entries(columns).map(([status, { title, color }]) => (
@@ -45,7 +43,7 @@ export default function JobBoard({ jobs }: { jobs: Job[] }) {
                     key={status}
                     title={title}
                     color={color}
-                    jobs={jobItems.filter(job => job.status === status)}
+                    jobs={jobs.filter(job => job.status === status)}
                 />
             ))}
         </div>
