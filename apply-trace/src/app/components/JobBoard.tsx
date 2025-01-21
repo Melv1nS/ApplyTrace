@@ -35,7 +35,7 @@ const columns = {
     }
 } as const
 
-export default function JobBoard({ jobs }: { jobs: Job[] }) {
+export default function JobBoard({ jobs, onDelete }: { jobs: Job[], onDelete: (jobId: string) => void }) {
     return (
         <div className="flex gap-4 overflow-x-auto pb-4">
             {Object.entries(columns).map(([status, { title, color }]) => (
@@ -44,6 +44,7 @@ export default function JobBoard({ jobs }: { jobs: Job[] }) {
                     title={title}
                     color={color}
                     jobs={jobs.filter(job => job.status === status)}
+                    onDelete={onDelete}
                 />
             ))}
         </div>

@@ -7,9 +7,10 @@ interface JobColumnProps {
     title: string
     color: string
     jobs: Job[]
+    onDelete: (jobId: string) => void
 }
 
-export default function JobColumn({ title, color, jobs }: JobColumnProps) {
+export default function JobColumn({ title, color, jobs, onDelete }: JobColumnProps) {
     return (
         <div className="flex-shrink-0 w-80 bg-white rounded-lg shadow-md">
             <div
@@ -20,7 +21,7 @@ export default function JobColumn({ title, color, jobs }: JobColumnProps) {
             </div>
             <div className="p-2 min-h-[calc(100vh-12rem)]">
                 {jobs.map(job => (
-                    <JobCard key={job.id} job={job} />
+                    <JobCard key={job.id} job={job} onDelete={onDelete} />
                 ))}
             </div>
         </div>

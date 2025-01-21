@@ -33,6 +33,25 @@ export default function HomePage() {
   const router = useRouter()
   const supabase = createClientComponentClient()
 
+  const handleDelete = async (jobId: string) => {
+    try {
+      const { error } = await supabase
+        .from('job_applications')
+        .delete()
+        .eq('id', jobId)
+
+      if (error) {
+        console.error('Error deleting job:', error)
+        return
+      }
+
+      // Note: We don't need to update the UI state manually since the real-time subscription
+      // will handle that for us when the database change occurs
+    } catch (error) {
+      console.error('Error deleting job:', error)
+    }
+  }
+
   useEffect(() => {
     // Check auth status
     const checkAuth = async () => {
@@ -241,7 +260,7 @@ export default function HomePage() {
         <h1 className="text-[#2C1810] text-3xl font-semibold">Job Applications</h1>
         <SignOutButton />
       </div>
-      <JobBoard jobs={formattedJobs} />
+      <JobBoard jobs={formattedJobs} onDelete={handleDelete} />
     </div>
   )
 }
