@@ -5,6 +5,7 @@ import { JobStatus } from '@prisma/client'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import crypto from 'crypto'
 import { checkAndRenewGmailWatch } from '@/app/utils/gmailWatch'
+import { JOB_EMAIL_ANALYSIS_PROMPT } from '@/app/utils/geminiPrompts'
 
 // Add interface for Gemini response
 interface GeminiAnalysis {
@@ -175,32 +176,7 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
     const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
-    const prompt = `Analyze this email for job application related content. Subject: "${subject}" Body: "${emailBody}"
-      
-      TASK:
-      1. Identify if this is a job-related email (application confirmation, rejection, etc.)
-      2. Extract the exact company name - look for patterns like "at [Company]", "opportunities at [Company]", "careers at [Company]"
-      3. Extract the exact role/position title - look for patterns like "position of [Role]", "the [Role] position", "for the [Role]"
-      4. Determine if this is an application confirmation or rejection
-      
-      IMPORTANT PATTERNS TO RECOGNIZE:
-      - Application confirmations often contain phrases like "received your submission", "received your application", "successfully received"
-      - Company names often follow prepositions like "at", "with", "for"
-      - Role titles are often preceded by "the", "position of", "role of"
-      - Look for company names in email domains and signatures
-      
-      Return a JSON object with these fields:
-      - isJobRelated (boolean): is this email related to a job application?
-      - type: either "APPLICATION", "REJECTION", or "OTHER"
-      - companyName: the exact company name found (do not abbreviate or modify it)
-      - roleTitle: the exact role title as mentioned in the email
-      - confidence: number between 0 and 1 indicating confidence in this analysis
-      
-      IMPORTANT: 
-      1. Return ONLY the raw JSON object, no markdown formatting, no code blocks, no backticks
-      2. Never return "Unknown" for company or role if they are explicitly mentioned in the email
-      3. Preserve exact company names and role titles as they appear in the email
-      4. For confidence: use 0.9+ for clear application confirmations, 0.7+ for likely job-related content`;
+    const prompt = JOB_EMAIL_ANALYSIS_PROMPT.replace('${subject}', subject).replace('${emailBody}', emailBody);
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
