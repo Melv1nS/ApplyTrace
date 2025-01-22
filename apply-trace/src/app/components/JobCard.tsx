@@ -24,11 +24,16 @@ export default function JobCard({ job, onDelete, onUpdate, index }: JobCardProps
     })
     const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
     console.log('User timezone:', userTimeZone) // For debugging
+    console.log('Original date:', job.appliedDate) // For debugging
+
+    // Parse the UTC date string
+    const utcDate = new Date(job.appliedDate)
+    console.log('Parsed UTC date:', utcDate.toISOString()) // For debugging
 
     const formattedDate = formatInTimeZone(
-        new Date(job.appliedDate),
+        utcDate,
         userTimeZone,
-        'MMM d, yyyy h:mm a zzz'  // zzz will show timezone name
+        'MMM d, yyyy h:mm a zzz'
     )
 
     const handleDelete = () => {

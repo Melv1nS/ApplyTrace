@@ -298,8 +298,8 @@ export default function JobBoardContainer() {
         company: job.company_name,
         position: job.role_title,
         status: statusMap[job.status],
-        lastUpdated: job.updated_at,
-        appliedDate: job.applied_date,
+        lastUpdated: job.updated_at.endsWith('Z') ? job.updated_at : job.updated_at + 'Z',
+        appliedDate: job.applied_date.endsWith('Z') ? job.applied_date : job.applied_date + 'Z',
         location: job.location || undefined,
         notes: job.notes || undefined
     }))
