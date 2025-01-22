@@ -17,8 +17,14 @@ const supabaseAdmin = createClient(
     }
 )
 
+// Initialize OAuth2 client
+const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+)
+
 async function getUserEmail(accessToken: string): Promise<string> {
-    const oauth2Client = new google.auth.OAuth2()
     oauth2Client.setCredentials({
         access_token: accessToken
     })
@@ -71,11 +77,7 @@ export async function GET(request: Request) {
 
         // Get user's email using the access token
         console.log('Fetching user email with token')
-        const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
-        oauth2Client.setCredentials({ access_token: session.access_token })
-
-        const { data: profile } = await gmail.users.getProfile({ userId: 'me' })
-        const userEmail = profile.emailAddress
+        const userEmail = await getUserEmail(session.access_token)
         console.log('Got user email:', userEmail)
 
         if (!userEmail) {
@@ -131,6 +133,16 @@ export async function GET(request: Request) {
                 ...result.error
             })
             throw result.error
+        }
+
+        // Set up Gmail watch after successful session storage
+        try {
+            console.log('Setting up Gmail watch')
+            await setupGmailWatch(session.access_token, session.user.id)
+            console.log('Gmail watch setup complete')
+        } catch (watchError) {
+            console.error('Error setting up Gmail watch:', watchError)
+            // Continue even if watch setup fails
         }
 
         console.log('Auth callback completed, redirecting to home')
