@@ -548,21 +548,13 @@ export async function POST(request: Request) {
           })
 
           // First check for existing application from this company
-          const { data: existingApplications } = await supabaseAdmin
-            .from('job_applications')
-            .select('*')
-            .eq('user_id', session.user_id)
-            .eq('company_name', analysis.companyName)
-            .order('created_at', { ascending: false })
-            .limit(1)
-
           if (analysis.type === 'REJECTION') {
             // Search for existing application from this company (including rejected ones)
             const { data: existingApplications } = await supabaseAdmin
               .from('job_applications')
               .select('*')
               .eq('user_id', session.user_id)
-              .eq('company_name', analysis.companyName)
+              .ilike('company_name', analysis.companyName)  // Case-insensitive company match
               .order('created_at', { ascending: false })  // Get most recent first
               .limit(1)
 
@@ -608,7 +600,17 @@ export async function POST(request: Request) {
               }
             }
           } else if (analysis.type === 'INTERVIEW_REQUEST') {
-            if (existingApplications?.[0]?.id) {
+            // For interview requests, also check role title case-insensitively
+            const { data: existingApplicationsWithRole } = await supabaseAdmin
+              .from('job_applications')
+              .select('*')
+              .eq('user_id', session.user_id)
+              .ilike('company_name', analysis.companyName)
+              .ilike('role_title', analysis.roleTitle)
+              .order('created_at', { ascending: false })
+              .limit(1)
+
+            if (existingApplicationsWithRole?.[0]?.id) {
               // Update existing application to reflect interview request
               const { error: updateError } = await supabaseAdmin
                 .from('job_applications')
@@ -617,7 +619,7 @@ export async function POST(request: Request) {
                   updated_at: new Date().toISOString(),
                   interview_request_email_id: messageId
                 })
-                .eq('id', existingApplications[0].id)
+                .eq('id', existingApplicationsWithRole[0].id)
 
               if (updateError) {
                 console.error('Error updating job application status for interview:', updateError)
@@ -644,23 +646,36 @@ export async function POST(request: Request) {
                 console.log('Successfully created new job application with interview status')
               }
             }
-          } else if (analysis.type === 'APPLICATION' || !existingApplications?.[0]) {
-            // Handle new applications or unknown companies
-            const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
-              id: crypto.randomUUID(),
-              user_id: session.user_id,
-              company_name: analysis.companyName,
-              role_title: analysis.roleTitle,
-              status: JobStatus.APPLIED,
-              applied_date: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              email_id: messageId
-            })
+          } else if (analysis.type === 'APPLICATION') {
+            // For new applications, check if a similar one exists case-insensitively
+            const { data: existingApplicationsWithRole } = await supabaseAdmin
+              .from('job_applications')
+              .select('*')
+              .eq('user_id', session.user_id)
+              .ilike('company_name', analysis.companyName)
+              .ilike('role_title', analysis.roleTitle)
+              .order('created_at', { ascending: false })
+              .limit(1)
 
-            if (insertError) {
-              console.error('Error creating job application:', insertError)
+            if (!existingApplicationsWithRole?.[0]) {
+              const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
+                id: crypto.randomUUID(),
+                user_id: session.user_id,
+                company_name: analysis.companyName,
+                role_title: analysis.roleTitle,
+                status: JobStatus.APPLIED,
+                applied_date: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                email_id: messageId
+              })
+
+              if (insertError) {
+                console.error('Error creating job application:', insertError)
+              } else {
+                console.log('Successfully created job application')
+              }
             } else {
-              console.log('Successfully created job application')
+              console.log('Similar application already exists, skipping creation')
             }
           } else {
             console.log('Skipping email processing - no action needed')
