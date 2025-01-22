@@ -231,10 +231,11 @@ export async function POST(request: Request) {
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
 
-    // Wrap Gmail API calls in a retry function
-    async function callGmailApi<T>(apiCall: () => Promise<T>): Promise<T> {
+    // Check and refresh access token if needed
+    async function ensureValidAccessToken() {
       try {
-        return await apiCall()
+        // Attempt a simple API call to check token validity
+        await gmail.users.getProfile({ userId: 'me' })
       } catch (error) {
         const gmailError = error as GmailApiError
         if (gmailError.code === 401) {
@@ -255,22 +256,21 @@ export async function POST(request: Request) {
             access_token: newAccessToken,
             refresh_token: session.refresh_token
           })
-
-          // Retry the API call
-          return await apiCall()
+        } else {
+          throw error
         }
-        throw error
       }
     }
 
-    // Get history list to find the new message
+    // Ensure valid access token before fetching Gmail history
+    await ensureValidAccessToken()
+
+    // Fetch Gmail history
     console.log('Fetching Gmail history...')
-    const { data: history } = await callGmailApi(() =>
-      gmail.users.history.list({
-        userId: 'me',
-        startHistoryId: historyId.toString()
-      })
-    )
+    const { data: history } = await gmail.users.history.list({
+      userId: 'me',
+      startHistoryId: historyId.toString()
+    })
 
     console.log('Gmail history response:', {
       hasHistory: !!history,
@@ -364,14 +364,12 @@ export async function POST(request: Request) {
         console.log('Fetching message details for:', messageId)
         let messageDetails
         try {
-          const { data: fullMessage } = await callGmailApi(() =>
-            gmail.users.messages.get({
-              userId: 'me',
-              id: messageId,
-              format: 'full',
-              metadataHeaders: ['subject', 'from', 'to']
-            })
-          )
+          const { data: fullMessage } = await gmail.users.messages.get({
+            userId: 'me',
+            id: messageId,
+            format: 'full',
+            metadataHeaders: ['subject', 'from', 'to']
+          })
           messageDetails = fullMessage
         } catch (error) {
           const gmailError = error as GmailApiError
