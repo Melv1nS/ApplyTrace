@@ -21,7 +21,11 @@ export default function JobCard({ job, onDelete, onUpdate, index }: JobCardProps
         position: job.position,
         location: job.location || ''
     })
-    const formattedDate = format(new Date(job.appliedDate), 'MMM d, yyyy h:mm a')
+    const formattedDate = format(
+        new Date(job.appliedDate),
+        'MMM d, yyyy h:mm a',
+        { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+    )
 
     const handleDelete = () => {
         setIsDeleteModalOpen(true)
