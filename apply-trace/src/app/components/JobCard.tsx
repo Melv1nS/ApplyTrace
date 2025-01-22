@@ -1,6 +1,7 @@
 "use client"
 
 import { format } from 'date-fns'
+import { formatInTimeZone } from 'date-fns-tz'
 import { useState } from 'react'
 import { Draggable } from '@hello-pangea/dnd'
 import DeleteConfirmationModal from './DeleteConfirmationModal'
@@ -24,13 +25,10 @@ export default function JobCard({ job, onDelete, onUpdate, index }: JobCardProps
     const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
     console.log('User timezone:', userTimeZone) // For debugging
 
-    const formattedDate = format(
+    const formattedDate = formatInTimeZone(
         new Date(job.appliedDate),
-        'MMM d, yyyy h:mm a (z)', // Added timezone indicator
-        {
-            timeZone: userTimeZone,
-            timeZoneName: 'short'
-        }
+        userTimeZone,
+        'MMM d, yyyy h:mm a zzz'  // zzz will show timezone name
     )
 
     const handleDelete = () => {
