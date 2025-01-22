@@ -21,10 +21,16 @@ export default function JobCard({ job, onDelete, onUpdate, index }: JobCardProps
         position: job.position,
         location: job.location || ''
     })
+    const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    console.log('User timezone:', userTimeZone) // For debugging
+
     const formattedDate = format(
         new Date(job.appliedDate),
-        'MMM d, yyyy h:mm a',
-        { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+        'MMM d, yyyy h:mm a (z)', // Added timezone indicator
+        {
+            timeZone: userTimeZone,
+            timeZoneName: 'short'
+        }
     )
 
     const handleDelete = () => {

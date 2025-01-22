@@ -31,6 +31,40 @@ async function getUserEmail(providerToken: string): Promise<string> {
     return profile.emailAddress || ''
 }
 
+async function exchangeCodeWithRetry(supabase: any, code: string, maxRetries = 3) {
+    let retryCount = 0;
+    const baseDelay = 1000; // Start with 1 second delay
+
+    while (retryCount < maxRetries) {
+        try {
+            const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+            if (error) {
+                if (error.status === 429) {
+                    const delay = baseDelay * Math.pow(2, retryCount);
+                    console.log(`Rate limited, attempt ${retryCount + 1}/${maxRetries}. Waiting ${delay}ms before retry`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    retryCount++;
+                    continue;
+                }
+                throw error;
+            }
+
+            return { data, error: null };
+        } catch (error: any) {
+            if (error.status !== 429 || retryCount === maxRetries - 1) {
+                return { data: null, error };
+            }
+            retryCount++;
+        }
+    }
+
+    return {
+        data: null,
+        error: new Error(`Failed after ${maxRetries} retries due to rate limiting`)
+    };
+}
+
 export async function GET(request: Request) {
     console.log('Auth callback started')
     try {
@@ -43,10 +77,12 @@ export async function GET(request: Request) {
         }
 
         console.log('Creating Supabase client')
-        const supabase = createRouteHandlerClient({ cookies })
+        const cookieStore = cookies()
+        const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
 
         console.log('Exchanging code for session')
-        const { data: { session }, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+        const { data, error: exchangeError } = await exchangeCodeWithRetry(supabase, code)
+        const session = data?.session
 
         if (exchangeError || !session) {
             console.error('Session exchange error:', exchangeError)
