@@ -9,7 +9,7 @@ import { checkAndRenewGmailWatch } from '@/app/utils/gmailWatch'
 // Add interface for Gemini response
 interface GeminiAnalysis {
   isJobRelated: boolean;
-  type: 'APPLICATION' | 'REJECTION' | 'OTHER';
+  type: 'APPLICATION' | 'REJECTION' | 'INTERVIEW_REQUEST' | 'OTHER';
   companyName: string;
   roleTitle: string;
   confidence: number;
@@ -547,6 +547,15 @@ export async function POST(request: Request) {
             status: analysis.type
           })
 
+          // First check for existing application from this company
+          const { data: existingApplications } = await supabaseAdmin
+            .from('job_applications')
+            .select('*')
+            .eq('user_id', session.user_id)
+            .eq('company_name', analysis.companyName)
+            .order('created_at', { ascending: false })
+            .limit(1)
+
           if (analysis.type === 'REJECTION') {
             // Search for existing application from this company (including rejected ones)
             const { data: existingApplications } = await supabaseAdmin
@@ -598,14 +607,51 @@ export async function POST(request: Request) {
                 console.log('Successfully created new rejected application')
               }
             }
-          } else {
-            // Handle non-rejection job-related emails as before
+          } else if (analysis.type === 'INTERVIEW_REQUEST') {
+            if (existingApplications?.[0]?.id) {
+              // Update existing application to reflect interview request
+              const { error: updateError } = await supabaseAdmin
+                .from('job_applications')
+                .update({
+                  status: JobStatus.INTERVIEW_SCHEDULED,
+                  updated_at: new Date().toISOString(),
+                  interview_request_email_id: messageId
+                })
+                .eq('id', existingApplications[0].id)
+
+              if (updateError) {
+                console.error('Error updating job application status for interview:', updateError)
+              } else {
+                console.log('Successfully updated job application status to interviewing')
+              }
+            } else {
+              // Create new application with INTERVIEW_SCHEDULED status if none exists
+              const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
+                id: crypto.randomUUID(),
+                user_id: session.user_id,
+                company_name: analysis.companyName,
+                role_title: analysis.roleTitle,
+                status: JobStatus.INTERVIEW_SCHEDULED,
+                applied_date: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                email_id: messageId,
+                interview_request_email_id: messageId
+              })
+
+              if (insertError) {
+                console.error('Error creating new job application for interview:', insertError)
+              } else {
+                console.log('Successfully created new job application with interview status')
+              }
+            }
+          } else if (analysis.type === 'APPLICATION' || !existingApplications?.[0]) {
+            // Handle new applications or unknown companies
             const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
               id: crypto.randomUUID(),
               user_id: session.user_id,
               company_name: analysis.companyName,
               role_title: analysis.roleTitle,
-              status: JobStatus.APPLIED,  // Always APPLIED for non-rejection emails
+              status: JobStatus.APPLIED,
               applied_date: new Date().toISOString(),
               updated_at: new Date().toISOString(),
               email_id: messageId
@@ -616,6 +662,8 @@ export async function POST(request: Request) {
             } else {
               console.log('Successfully created job application')
             }
+          } else {
+            console.log('Skipping email processing - no action needed')
           }
         } else {
           console.log('Email not job-related or low confidence:', {
