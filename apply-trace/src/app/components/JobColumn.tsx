@@ -28,10 +28,11 @@ export default function JobColumn({ title, color, jobs, onDelete, onUpdate }: Jo
                         {...provided.droppableProps}
                         className="p-2 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
                     >
-                        {jobs.map(job => (
+                        {jobs.map((job, index) => (
                             <JobCard
                                 key={job.id}
                                 job={job}
+                                index={index}
                                 onDelete={onDelete}
                                 onUpdate={onUpdate}
                             />

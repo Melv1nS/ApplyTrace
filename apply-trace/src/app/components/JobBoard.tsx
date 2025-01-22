@@ -1,8 +1,7 @@
 "use client"
 
-import { DragDropContext, Droppable } from '@hello-pangea/dnd'
+import { DragDropContext, DropResult } from '@hello-pangea/dnd'
 import JobColumn from './JobColumn'
-import { useState } from 'react'
 
 interface Job {
     id: string
@@ -45,18 +44,41 @@ export default function JobBoard({
     onDelete: (jobId: string) => void
     onUpdate: (jobId: string, updates: Partial<Job>) => void
 }) {
+    const handleDragEnd = (result: DropResult) => {
+        const { destination, source, draggableId } = result
+
+        // Dropped outside the list
+        if (!destination) {
+            return
+        }
+
+        // Dropped in the same position
+        if (
+            destination.droppableId === source.droppableId &&
+            destination.index === source.index
+        ) {
+            return
+        }
+
+        // Update the job status
+        const newStatus = destination.droppableId as Job['status']
+        onUpdate(draggableId, { status: newStatus })
+    }
+
     return (
-        <div className="flex gap-4 overflow-x-auto pb-4">
-            {Object.entries(columns).map(([status, { title, color }]) => (
-                <JobColumn
-                    key={status}
-                    title={title}
-                    color={color}
-                    jobs={jobs.filter(job => job.status === status)}
-                    onDelete={onDelete}
-                    onUpdate={onUpdate}
-                />
-            ))}
-        </div>
+        <DragDropContext onDragEnd={handleDragEnd}>
+            <div className="flex gap-4 overflow-x-auto pb-4">
+                {Object.entries(columns).map(([status, { title, color }]) => (
+                    <JobColumn
+                        key={status}
+                        title={title}
+                        color={color}
+                        jobs={jobs.filter(job => job.status === status)}
+                        onDelete={onDelete}
+                        onUpdate={onUpdate}
+                    />
+                ))}
+            </div>
+        </DragDropContext>
     )
 }
