@@ -10,7 +10,7 @@ interface Job {
     position: string
     status: 'applied' | 'interviewing' | 'offer' | 'rejected' | 'archived'
     lastUpdated: string
-    // Optional fields you might want to add:
+    appliedDate: string
     location?: string
     salary?: string
     notes?: string
@@ -30,7 +30,7 @@ export default function JobCard({ job, onDelete, onUpdate }: JobCardProps) {
         position: job.position,
         location: job.location || ''
     })
-    const formattedDate = format(new Date(job.lastUpdated), 'MMM d, yyyy h:mm a')
+    const formattedDate = format(new Date(job.appliedDate), 'MMM d, yyyy h:mm a')
 
     const handleDelete = () => {
         setIsDeleteModalOpen(true)

@@ -35,6 +35,7 @@ interface JobApplication {
   role_title: string
   status: JobStatus
   updated_at: string
+  applied_date: string
   notes?: string | null
   location?: string
 }
@@ -45,6 +46,7 @@ interface Job {
   position: string
   status: FrontendStatus
   lastUpdated: string
+  appliedDate: string
   location?: string
   notes?: string
 }
@@ -328,7 +330,9 @@ export default function HomePage() {
     position: job.role_title,
     status: statusMap[job.status as JobStatus],
     lastUpdated: job.updated_at,
-    notes: job.notes
+    appliedDate: job.applied_date,
+    notes: job.notes,
+    location: job.location
   }))
 
   return (
