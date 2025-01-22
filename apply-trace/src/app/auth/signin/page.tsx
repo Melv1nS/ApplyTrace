@@ -15,7 +15,8 @@ export default function SignIn() {
                 scopes: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/pubsub',
                 queryParams: {
                     access_type: 'offline',
-                    prompt: 'consent'
+                    prompt: 'consent',
+                    response_type: 'code'
                 }
             },
         });
