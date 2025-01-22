@@ -486,6 +486,11 @@ export async function POST(request: Request) {
         const from = headers.find(h => h?.name?.toLowerCase() === 'from')?.value || ''
         const to = headers.find(h => h?.name?.toLowerCase() === 'to')?.value || ''
 
+        // Get email timestamp and convert to UTC ISO string
+        const emailTimestamp = messageDetails.internalDate
+          ? new Date(parseInt(messageDetails.internalDate)).toISOString()
+          : new Date().toISOString()
+
         // Get full message body
         let messageBody = ''
         if (messageDetails.payload?.body?.data) {
@@ -563,7 +568,7 @@ export async function POST(request: Request) {
                 company_name: analysis.companyName,
                 role_title: analysis.roleTitle,
                 status: JobStatus.REJECTED,
-                applied_date: new Date().toISOString(),
+                applied_date: emailTimestamp,
                 updated_at: new Date().toISOString(),
                 email_id: messageId,
                 rejection_email_id: messageId
@@ -610,7 +615,7 @@ export async function POST(request: Request) {
                 company_name: analysis.companyName,
                 role_title: analysis.roleTitle,
                 status: JobStatus.INTERVIEW_SCHEDULED,
-                applied_date: new Date().toISOString(),
+                applied_date: emailTimestamp,
                 updated_at: new Date().toISOString(),
                 email_id: messageId,
                 interview_request_email_id: messageId
@@ -640,7 +645,7 @@ export async function POST(request: Request) {
                 company_name: analysis.companyName,
                 role_title: analysis.roleTitle,
                 status: JobStatus.APPLIED,
-                applied_date: new Date().toISOString(),
+                applied_date: emailTimestamp,
                 updated_at: new Date().toISOString(),
                 email_id: messageId
               })
