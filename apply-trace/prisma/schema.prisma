@@ -21,15 +21,16 @@ model EmailSession {
 }
 
 model JobApplication {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  companyName String    @map("company_name")
-  roleTitle   String    @map("role_title")
-  status      JobStatus @default(APPLIED)
-  appliedDate DateTime  @map("applied_date")
-  emailId     String    @unique @map("email_id")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  companyName   String   @map("company_name")
+  roleTitle     String   @map("role_title")
+  status        JobStatus
+  appliedDate   DateTime @map("applied_date")
+  emailId       String   @unique @map("email_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  isDeleted     Boolean  @default(false) @map("is_deleted")
 
   @@map("job_applications")
 }

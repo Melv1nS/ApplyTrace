@@ -40,7 +40,10 @@ export default function HomePage() {
 
       const { error } = await supabase
         .from('job_applications')
-        .delete()
+        .update({
+          is_deleted: true,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', jobId)
 
       if (error) {
@@ -108,6 +111,7 @@ export default function HomePage() {
           .from('job_applications')
           .select('*')
           .eq('user_id', session.user.id)
+          .eq('is_deleted', false)
           .order('updated_at', { ascending: false })
 
         if (fetchError) {

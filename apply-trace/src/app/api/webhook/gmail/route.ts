@@ -348,14 +348,18 @@ export async function POST(request: Request) {
       console.log('Processing message:', messageId)
 
       try {
-        // Skip if we've already processed this message
+        // Check if the message has already been processed and not deleted
         const { data: existingJob } = await supabaseAdmin
           .from('job_applications')
-          .select('id')
+          .select('id, is_deleted')
           .eq('email_id', messageId)
           .single()
 
         if (existingJob) {
+          if (existingJob.is_deleted) {
+            console.log('Skipping deleted application:', messageId)
+            return
+          }
           console.log('Skipping already processed message:', messageId)
           return
         }
