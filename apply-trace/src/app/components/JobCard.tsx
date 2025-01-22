@@ -3,18 +3,7 @@
 import { format } from 'date-fns'
 import { useState } from 'react'
 import DeleteConfirmationModal from './DeleteConfirmationModal'
-
-interface Job {
-    id: string
-    company: string
-    position: string
-    status: 'applied' | 'interviewing' | 'offer' | 'rejected' | 'archived'
-    lastUpdated: string
-    appliedDate: string
-    location?: string
-    salary?: string
-    notes?: string
-}
+import type { Job } from '@/app/types/job'
 
 interface JobCardProps {
     job: Job
