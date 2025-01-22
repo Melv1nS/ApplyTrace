@@ -16,7 +16,6 @@ export default async function HomePage() {
 
     if (sessionError) {
       console.error('Session error:', sessionError)
-      // Sign out to clear the session
       await supabase.auth.signOut()
       redirect('/auth/signin')
     }
@@ -25,18 +24,24 @@ export default async function HomePage() {
       redirect('/auth/signin')
     }
 
-    // Verify user exists
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', session.user.id)
-      .single()
+    // Only verify user in database if they've been signed in for a while
+    // This gives Supabase time to create the user record after OAuth
+    const signedInAt = new Date(session.user.confirmed_at || session.user.created_at)
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000)
 
-    if (userError || !user) {
-      console.error('User error:', userError)
-      // Sign out and redirect if user doesn't exist
-      await supabase.auth.signOut()
-      redirect('/auth/signin')
+    if (signedInAt < fiveMinutesAgo) {
+      // Only check for long-running sessions
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', session.user.id)
+        .single()
+
+      if (userError || !user) {
+        console.error('User error:', userError)
+        await supabase.auth.signOut()
+        redirect('/auth/signin')
+      }
     }
 
     return <JobBoardContainer />
