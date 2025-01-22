@@ -485,11 +485,20 @@ export async function POST(request: Request) {
         const subject = headers.find(h => h?.name?.toLowerCase() === 'subject')?.value || ''
         const from = headers.find(h => h?.name?.toLowerCase() === 'from')?.value || ''
         const to = headers.find(h => h?.name?.toLowerCase() === 'to')?.value || ''
+        const date = headers.find(h => h?.name?.toLowerCase() === 'date')?.value
 
-        // Get email timestamp and convert to UTC ISO string
-        const emailTimestamp = messageDetails.internalDate
-          ? new Date(parseInt(messageDetails.internalDate)).toISOString()
-          : new Date().toISOString()
+        // Get email timestamp from headers first (more accurate for sent time), fallback to internalDate
+        let emailTimestamp: string
+        if (date) {
+          // Parse the email header date which includes timezone information
+          emailTimestamp = new Date(date).toISOString()
+        } else if (messageDetails.internalDate) {
+          // Fallback to internalDate (UTC milliseconds)
+          emailTimestamp = new Date(parseInt(messageDetails.internalDate)).toISOString()
+        } else {
+          // Last resort fallback
+          emailTimestamp = new Date().toISOString()
+        }
 
         // Get full message body
         let messageBody = ''
@@ -586,6 +595,7 @@ export async function POST(request: Request) {
               .from('job_applications')
               .select('*')
               .eq('user_id', session.user_id)
+              .eq('is_deleted', false)  // Only check non-deleted applications
               .ilike('company_name', analysis.companyName)
               .ilike('role_title', analysis.roleTitle)
               .order('created_at', { ascending: false })
@@ -633,6 +643,7 @@ export async function POST(request: Request) {
               .from('job_applications')
               .select('*')
               .eq('user_id', session.user_id)
+              .eq('is_deleted', false)  // Only check non-deleted applications
               .ilike('company_name', analysis.companyName)
               .ilike('role_title', analysis.roleTitle)
               .order('created_at', { ascending: false })
