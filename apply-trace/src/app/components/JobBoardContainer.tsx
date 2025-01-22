@@ -269,6 +269,15 @@ export default function JobBoardContainer() {
                     )
                     .subscribe((status) => {
                         console.log('Subscription status:', status)
+
+                        // If subscription fails, try to reconnect
+                        if (status === 'SUBSCRIPTION_ERROR' || status === 'CHANNEL_ERROR') {
+                            console.error('Subscription error, attempting to reconnect in 5 seconds...')
+                            setTimeout(() => {
+                                console.log('Attempting to reconnect...')
+                                channel.subscribe()
+                            }, 5000)
+                        }
                     })
 
                 return () => {

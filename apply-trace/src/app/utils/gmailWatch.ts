@@ -193,3 +193,41 @@ export async function stopGmailWatch(accessToken: string): Promise<boolean> {
     return false
   }
 }
+
+export async function checkAndRenewGmailWatch(accessToken: string, userId: string): Promise<WatchResponse> {
+  try {
+    logDebug('CHECK_WATCH_START', { userId })
+    const oauth2Client = new google.auth.OAuth2()
+    oauth2Client.setCredentials({
+      access_token: accessToken
+    })
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
+
+    // Get current watch state
+    const watchState = await gmail.users.getProfile({
+      userId: 'me'
+    })
+
+    const historyId = watchState.data.historyId
+    const now = Date.now()
+    const oneHourFromNow = now + (60 * 60 * 1000)
+
+    // If historyId is undefined or watch is about to expire, renew it
+    if (!historyId || (watchState.data.emailAddress && oneHourFromNow >= Number(watchState.data.messagesTotal))) {
+      logDebug('RENEWING_WATCH', {
+        historyId,
+        emailAddress: watchState.data.emailAddress
+      })
+      return setupGmailWatch(accessToken, userId)
+    }
+
+    return {
+      success: true,
+      historyId: historyId?.toString()
+    }
+  } catch (error) {
+    logError('CHECK_WATCH_FAILED', error)
+    // If there's an error checking the watch state, try to set it up again
+    return setupGmailWatch(accessToken, userId)
+  }
+}

@@ -4,6 +4,7 @@ import { google } from 'googleapis'
 import { JobStatus } from '@prisma/client'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import crypto from 'crypto'
+import { checkAndRenewGmailWatch } from '@/app/utils/gmailWatch'
 
 // Add interface for Gemini response
 interface GeminiAnalysis {
@@ -636,6 +637,15 @@ export async function POST(request: Request) {
       .from('email_sessions')
       .update({ last_history_id: historyId.toString() })
       .eq('user_id', session.user_id)
+
+    // After processing messages, check and renew Gmail watch if needed
+    console.log('Checking Gmail watch status...')
+    const watchResponse = await checkAndRenewGmailWatch(session.access_token, session.user_id)
+    if (!watchResponse.success) {
+      console.error('Failed to renew Gmail watch:', watchResponse.error)
+    } else {
+      console.log('Gmail watch status checked/renewed successfully')
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {
