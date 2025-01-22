@@ -8,9 +8,10 @@ interface JobColumnProps {
     color: string
     jobs: Job[]
     onDelete: (jobId: string) => void
+    onUpdate: (jobId: string, updates: Partial<Job>) => void
 }
 
-export default function JobColumn({ title, color, jobs, onDelete }: JobColumnProps) {
+export default function JobColumn({ title, color, jobs, onDelete, onUpdate }: JobColumnProps) {
     return (
         <div className="flex-shrink-0 w-80 bg-white rounded-lg shadow-md">
             <div
@@ -21,7 +22,12 @@ export default function JobColumn({ title, color, jobs, onDelete }: JobColumnPro
             </div>
             <div className="p-2 min-h-[calc(100vh-12rem)]">
                 {jobs.map(job => (
-                    <JobCard key={job.id} job={job} onDelete={onDelete} />
+                    <JobCard
+                        key={job.id}
+                        job={job}
+                        onDelete={onDelete}
+                        onUpdate={onUpdate}
+                    />
                 ))}
             </div>
         </div>

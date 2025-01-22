@@ -1,6 +1,6 @@
 "use client"
 
-import { formatDistanceToNow } from 'date-fns'
+import { format } from 'date-fns'
 import { useState } from 'react'
 import DeleteConfirmationModal from './DeleteConfirmationModal'
 
@@ -19,11 +19,18 @@ interface Job {
 interface JobCardProps {
     job: Job
     onDelete: (jobId: string) => void
+    onUpdate: (jobId: string, updates: Partial<Job>) => void
 }
 
-export default function JobCard({ job, onDelete }: JobCardProps) {
+export default function JobCard({ job, onDelete, onUpdate }: JobCardProps) {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
-    const timeAgo = formatDistanceToNow(new Date(job.lastUpdated), { addSuffix: true })
+    const [isEditing, setIsEditing] = useState(false)
+    const [editedValues, setEditedValues] = useState({
+        company: job.company,
+        position: job.position,
+        location: job.location || ''
+    })
+    const formattedDate = format(new Date(job.lastUpdated), 'MMM d, yyyy h:mm a')
 
     const handleDelete = () => {
         setIsDeleteModalOpen(true)
@@ -34,26 +41,101 @@ export default function JobCard({ job, onDelete }: JobCardProps) {
         setIsDeleteModalOpen(false)
     }
 
+    const handleEdit = () => {
+        setIsEditing(true)
+    }
+
+    const handleSave = () => {
+        onUpdate(job.id, {
+            company: editedValues.company,
+            position: editedValues.position,
+            location: editedValues.location || undefined
+        })
+        setIsEditing(false)
+    }
+
+    const handleCancel = () => {
+        setEditedValues({
+            company: job.company,
+            position: job.position,
+            location: job.location || ''
+        })
+        setIsEditing(false)
+    }
+
     return (
         <>
             <div className="bg-white border border-[#E8E2D9] rounded-md p-4 mb-2 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-medium text-[#2C1810] line-clamp-1">{job.company}</h3>
-                    <button
-                        onClick={handleDelete}
-                        className="text-[#8B7355] hover:text-red-600 text-sm px-2 py-1 rounded-md hover:bg-red-50 transition-colors"
-                    >
-                        ✕
-                    </button>
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            value={editedValues.company}
+                            onChange={(e) => setEditedValues(prev => ({ ...prev, company: e.target.value }))}
+                            className="font-medium text-[#2C1810] border-b border-[#E8E2D9] focus:border-[#8B7355] outline-none px-1"
+                        />
+                    ) : (
+                        <h3 className="font-medium text-[#2C1810] line-clamp-1">{job.company}</h3>
+                    )}
+                    <div className="flex gap-2">
+                        {isEditing ? (
+                            <>
+                                <button
+                                    onClick={handleSave}
+                                    className="text-[#6B8E23] hover:text-[#556B2F] text-sm px-2 py-1 rounded-md hover:bg-green-50 transition-colors"
+                                >
+                                    Save
+                                </button>
+                                <button
+                                    onClick={handleCancel}
+                                    className="text-[#8B7355] hover:text-[#6B4423] text-sm px-2 py-1 rounded-md hover:bg-red-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <button
+                                    onClick={handleEdit}
+                                    className="text-[#8B7355] hover:text-[#6B4423] text-sm px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+                                >
+                                    ✎
+                                </button>
+                                <button
+                                    onClick={handleDelete}
+                                    className="text-[#8B7355] hover:text-red-600 text-sm px-2 py-1 rounded-md hover:bg-red-50 transition-colors"
+                                >
+                                    ✕
+                                </button>
+                            </>
+                        )}
+                    </div>
                 </div>
 
-                <p className="text-sm text-[#6B4423] mb-3 line-clamp-2">{job.position}</p>
+                {isEditing ? (
+                    <input
+                        type="text"
+                        value={editedValues.position}
+                        onChange={(e) => setEditedValues(prev => ({ ...prev, position: e.target.value }))}
+                        className="text-sm text-[#6B4423] mb-3 w-full border-b border-[#E8E2D9] focus:border-[#8B7355] outline-none px-1"
+                    />
+                ) : (
+                    <p className="text-sm text-[#6B4423] mb-3 line-clamp-2">{job.position}</p>
+                )}
 
                 <div className="flex justify-between items-center text-xs">
-                    {job.location && (
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            value={editedValues.location}
+                            onChange={(e) => setEditedValues(prev => ({ ...prev, location: e.target.value }))}
+                            placeholder="Add location"
+                            className="text-[#8B7355] border-b border-[#E8E2D9] focus:border-[#8B7355] outline-none px-1"
+                        />
+                    ) : job.location ? (
                         <span className="text-[#8B7355]">📍 {job.location}</span>
-                    )}
-                    <span className="text-[#6B4423]">{timeAgo}</span>
+                    ) : null}
+                    <span className="text-[#6B4423]">{formattedDate}</span>
                 </div>
             </div>
 

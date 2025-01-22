@@ -30,6 +30,13 @@ interface GmailApiError {
   }>;
 }
 
+// Add interface for Gemini API errors
+interface GeminiApiError {
+  status: number;
+  message: string;
+  details?: unknown;
+}
+
 // Create a Supabase client with the service role key
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -115,8 +122,9 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
     // Remove any markdown code block formatting if present
     const jsonStr = text.replace(/^```json\n|\n```$/g, '').trim();
     return JSON.parse(jsonStr);
-  } catch (error: any) {
-    if (error?.status === 429 && rateLimiter.retryCount < rateLimiter.maxRetries) {
+  } catch (error: unknown) {
+    const geminiError = error as GeminiApiError;
+    if (geminiError?.status === 429 && rateLimiter.retryCount < rateLimiter.maxRetries) {
       rateLimiter.retryCount++;
       console.log(`Rate limited, attempt ${rateLimiter.retryCount}/${rateLimiter.maxRetries}. Retrying in ${rateLimiter.getBackoffDelay()}ms`);
       return analyzeWithGemini(subject, emailBody);

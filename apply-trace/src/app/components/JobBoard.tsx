@@ -10,6 +10,7 @@ interface Job {
     position: string
     status: 'applied' | 'interviewing' | 'offer' | 'rejected' | 'archived'
     lastUpdated: string
+    location?: string
 }
 
 const columns = {
@@ -35,7 +36,15 @@ const columns = {
     }
 } as const
 
-export default function JobBoard({ jobs, onDelete }: { jobs: Job[], onDelete: (jobId: string) => void }) {
+export default function JobBoard({
+    jobs,
+    onDelete,
+    onUpdate
+}: {
+    jobs: Job[]
+    onDelete: (jobId: string) => void
+    onUpdate: (jobId: string, updates: Partial<Job>) => void
+}) {
     return (
         <div className="flex gap-4 overflow-x-auto pb-4">
             {Object.entries(columns).map(([status, { title, color }]) => (
@@ -45,6 +54,7 @@ export default function JobBoard({ jobs, onDelete }: { jobs: Job[], onDelete: (j
                     color={color}
                     jobs={jobs.filter(job => job.status === status)}
                     onDelete={onDelete}
+                    onUpdate={onUpdate}
                 />
             ))}
         </div>

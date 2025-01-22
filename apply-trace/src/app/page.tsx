@@ -15,8 +15,18 @@ const statusMap = {
   ARCHIVED: 'archived'
 } as const
 
+// Map frontend status to backend status
+const reverseStatusMap = {
+  applied: 'APPLIED',
+  interviewing: 'INTERVIEW_SCHEDULED',
+  offer: 'OFFER_RECEIVED',
+  rejected: 'REJECTED',
+  archived: 'ARCHIVED'
+} as const
+
 // Add type for backend status
 type JobStatus = keyof typeof statusMap
+type FrontendStatus = typeof statusMap[JobStatus]
 
 interface JobApplication {
   id: string
@@ -26,12 +36,66 @@ interface JobApplication {
   status: JobStatus
   updated_at: string
   notes?: string | null
+  location?: string
+}
+
+interface Job {
+  id: string
+  company: string
+  position: string
+  status: FrontendStatus
+  lastUpdated: string
+  location?: string
+  notes?: string
 }
 
 export default function HomePage() {
   const [jobs, setJobs] = useState<JobApplication[]>([])
   const router = useRouter()
   const supabase = createClientComponentClient()
+
+  const handleUpdate = async (jobId: string, updates: Partial<Job>) => {
+    try {
+      // Convert frontend updates to backend format
+      const backendUpdates: Partial<JobApplication> = {
+        ...(updates.company && { company_name: updates.company }),
+        ...(updates.position && { role_title: updates.position }),
+        ...(updates.status && { status: reverseStatusMap[updates.status] as JobStatus }),
+        ...(updates.location !== undefined && { location: updates.location })
+      }
+
+      // Optimistically update UI
+      setJobs(currentJobs => currentJobs.map(job =>
+        job.id === jobId ? { ...job, ...backendUpdates } : job
+      ))
+
+      const { error } = await supabase
+        .from('job_applications')
+        .update({
+          ...backendUpdates,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId)
+
+      if (error) {
+        console.error('Error updating job:', error)
+        // Revert optimistic update on error
+        const { data } = await supabase
+          .from('job_applications')
+          .select('*')
+          .eq('id', jobId)
+          .single()
+
+        if (data) {
+          setJobs(currentJobs => currentJobs.map(job =>
+            job.id === jobId ? data : job
+          ))
+        }
+      }
+    } catch (error) {
+      console.error('Error updating job:', error)
+    }
+  }
 
   const handleDelete = async (jobId: string) => {
     try {
@@ -273,7 +337,7 @@ export default function HomePage() {
         <h1 className="text-[#2C1810] text-3xl font-semibold">Job Applications</h1>
         <SignOutButton />
       </div>
-      <JobBoard jobs={formattedJobs} onDelete={handleDelete} />
+      <JobBoard jobs={formattedJobs} onDelete={handleDelete} onUpdate={handleUpdate} />
     </div>
   )
 }
