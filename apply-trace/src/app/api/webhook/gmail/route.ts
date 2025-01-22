@@ -63,13 +63,6 @@ const rateLimiter = {
   }
 }
 
-// Add OAuth2 config
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
-)
-
 // Add webhook rate limiting
 const webhookRateLimiter = {
   requests: new Map<string, { count: number, firstRequest: number }>(),
@@ -101,28 +94,63 @@ const webhookRateLimiter = {
 
 async function refreshAccessToken(refreshToken: string, userEmail: string) {
   try {
-    oauth2Client.setCredentials({
+    // Create a new OAuth2 client for each refresh to avoid state conflicts
+    const refreshClient = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+    )
+
+    refreshClient.setCredentials({
       refresh_token: refreshToken
     })
-    const { credentials } = await oauth2Client.refreshAccessToken()
 
-    if (!credentials.access_token) {
+    const response = await refreshClient.refreshAccessToken()
+    const accessToken = response.credentials.access_token
+
+    if (!accessToken) {
       throw new Error('No access token in refresh response')
     }
 
-    return credentials.access_token
+    // Check if refresh token was also returned and update it
+    if (response.credentials.refresh_token) {
+      // Update both tokens in the database
+      const { error: updateError } = await supabaseAdmin
+        .from('email_sessions')
+        .update({
+          access_token: accessToken,
+          refresh_token: response.credentials.refresh_token,
+          updated_at: new Date().toISOString()
+        })
+        .eq('email', userEmail)
+
+      if (updateError) {
+        console.error('Failed to update tokens:', updateError)
+        throw new Error('Failed to update tokens in database')
+      }
+    }
+
+    return accessToken
   } catch (error: unknown) {
     console.error('Error refreshing access token:', error)
 
-    // Check for specific error conditions
-    if (error instanceof Error && error.message?.includes('invalid_grant')) {
-      // Remove invalid session
-      await supabaseAdmin
-        .from('email_sessions')
-        .delete()
-        .eq('email', userEmail)
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase()
+      // Check for various OAuth2 error conditions
+      if (
+        errorMessage.includes('invalid_grant') ||
+        errorMessage.includes('invalid_request') ||
+        errorMessage.includes('invalid_client')
+      ) {
+        console.log('OAuth2 error detected, removing invalid session')
+        // Remove invalid session
+        await supabaseAdmin
+          .from('email_sessions')
+          .delete()
+          .eq('email', userEmail)
 
-      throw new Error('Invalid refresh token - session removed')
+        throw new Error('Invalid OAuth2 credentials - session removed')
+      }
     }
 
     throw error
@@ -291,14 +319,23 @@ export async function POST(request: Request) {
       email: session.email
     })
 
-    // Initialize Gmail API client with token refresh handling
-    const oauth2Client = new google.auth.OAuth2()
-    oauth2Client.setCredentials({
+    // Initialize Gmail API client
+    const authClient = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+    )
+
+    // Set initial credentials
+    authClient.setCredentials({
       access_token: session.access_token,
       refresh_token: session.refresh_token
     })
 
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
+    const gmail = google.gmail({
+      version: 'v1',
+      auth: authClient
+    })
 
     // Update token refresh handling
     async function ensureValidAccessToken() {
@@ -307,40 +344,40 @@ export async function POST(request: Request) {
       } catch (error: unknown) {
         if (error instanceof Error) {
           const isGmailError = 'code' in error
-          if (isGmailError && (error as GmailApiError).code === 401 || error.message?.includes('invalid_grant')) {
-            console.log('Access token expired, refreshing...')
+          const errorCode = isGmailError ? (error as GmailApiError).code : null
+          const errorMessage = error.message.toLowerCase()
+
+          if (
+            errorCode === 401 ||
+            errorMessage.includes('invalid_grant') ||
+            errorMessage.includes('invalid_request') ||
+            errorMessage.includes('invalid_client')
+          ) {
+            console.log('Access token expired or invalid, refreshing...')
             try {
               const newAccessToken = await refreshAccessToken(session.refresh_token, data.emailAddress)
 
-              // Update the session with new access token
-              const { error: updateError } = await supabaseAdmin
-                .from('email_sessions')
-                .update({
-                  access_token: newAccessToken,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', session.id)
-
-              if (updateError) {
-                throw new Error('Failed to update session with new token')
-              }
-
               // Update oauth client with new token
-              oauth2Client.setCredentials({
+              authClient.setCredentials({
                 access_token: newAccessToken,
                 refresh_token: session.refresh_token
               })
             } catch (refreshError) {
-              if (refreshError instanceof Error && refreshError.message?.includes('session removed')) {
+              if (refreshError instanceof Error &&
+                (refreshError.message?.includes('session removed') ||
+                  refreshError.message?.includes('invalid_grant'))) {
                 return NextResponse.json({
                   error: 'Session invalid and removed. Please re-authenticate.'
                 }, { status: 401 })
               }
               throw refreshError
             }
+          } else {
+            throw error
           }
+        } else {
+          throw error
         }
-        throw error
       }
     }
 
