@@ -70,15 +70,61 @@ const oauth2Client = new google.auth.OAuth2(
   `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
 )
 
-async function refreshAccessToken(refreshToken: string) {
+// Add webhook rate limiting
+const webhookRateLimiter = {
+  requests: new Map<string, { count: number, firstRequest: number }>(),
+  maxRequests: 10,
+  windowMs: 60000, // 1 minute
+  isRateLimited(emailAddress: string): boolean {
+    const now = Date.now()
+    const userRequests = this.requests.get(emailAddress)
+
+    if (!userRequests) {
+      this.requests.set(emailAddress, { count: 1, firstRequest: now })
+      return false
+    }
+
+    if (now - userRequests.firstRequest > this.windowMs) {
+      // Reset window
+      this.requests.set(emailAddress, { count: 1, firstRequest: now })
+      return false
+    }
+
+    if (userRequests.count >= this.maxRequests) {
+      return true
+    }
+
+    userRequests.count++
+    return false
+  }
+}
+
+async function refreshAccessToken(refreshToken: string, userEmail: string) {
   try {
     oauth2Client.setCredentials({
       refresh_token: refreshToken
     })
     const { credentials } = await oauth2Client.refreshAccessToken()
+
+    if (!credentials.access_token) {
+      throw new Error('No access token in refresh response')
+    }
+
     return credentials.access_token
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error refreshing access token:', error)
+
+    // Check for specific error conditions
+    if (error instanceof Error && error.message?.includes('invalid_grant')) {
+      // Remove invalid session
+      await supabaseAdmin
+        .from('email_sessions')
+        .delete()
+        .eq('email', userEmail)
+
+      throw new Error('Invalid refresh token - session removed')
+    }
+
     throw error
   }
 }
@@ -145,23 +191,17 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
 export async function POST(request: Request) {
   try {
     const requestBody = await request.json()
-
-    // Log the incoming payload for debugging
     console.log('Received webhook payload:', JSON.stringify(requestBody))
 
-    // Handle Pub/Sub push notification format
     const message = requestBody.message
     if (!message?.data) {
       console.error('Invalid Pub/Sub message format')
       return NextResponse.json({ error: 'Invalid message format' }, { status: 400 })
     }
 
-    // Pub/Sub messages come base64 encoded
     const decodedData = Buffer.from(message.data, 'base64').toString()
     console.log('Decoded message data:', decodedData)
 
-    // Handle Gmail push notification format
-    // The message might be a test message from topic setup
     if (decodedData === 'test') {
       console.log('Received test message, acknowledging')
       return NextResponse.json({ success: true })
@@ -173,6 +213,12 @@ export async function POST(request: Request) {
     } catch (error) {
       console.error('Failed to parse message data:', error)
       return NextResponse.json({ error: 'Invalid message data' }, { status: 400 })
+    }
+
+    // Apply rate limiting
+    if (webhookRateLimiter.isRateLimited(data.emailAddress)) {
+      console.log(`Rate limit exceeded for ${data.emailAddress}`)
+      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 })
     }
 
     console.log('Parsed notification data:', data)
@@ -239,34 +285,47 @@ export async function POST(request: Request) {
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
 
-    // Check and refresh access token if needed
+    // Update token refresh handling
     async function ensureValidAccessToken() {
       try {
-        // Attempt a simple API call to check token validity
         await gmail.users.getProfile({ userId: 'me' })
-      } catch (error) {
-        const gmailError = error as GmailApiError
-        if (gmailError.code === 401) {
-          console.log('Access token expired, refreshing...')
-          const newAccessToken = await refreshAccessToken(session.refresh_token)
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          const isGmailError = 'code' in error
+          if (isGmailError && (error as GmailApiError).code === 401 || error.message?.includes('invalid_grant')) {
+            console.log('Access token expired, refreshing...')
+            try {
+              const newAccessToken = await refreshAccessToken(session.refresh_token, data.emailAddress)
 
-          // Update the session with new access token
-          await supabaseAdmin
-            .from('email_sessions')
-            .update({
-              access_token: newAccessToken,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', session.id)
+              // Update the session with new access token
+              const { error: updateError } = await supabaseAdmin
+                .from('email_sessions')
+                .update({
+                  access_token: newAccessToken,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', session.id)
 
-          // Update oauth client with new token
-          oauth2Client.setCredentials({
-            access_token: newAccessToken,
-            refresh_token: session.refresh_token
-          })
-        } else {
-          throw error
+              if (updateError) {
+                throw new Error('Failed to update session with new token')
+              }
+
+              // Update oauth client with new token
+              oauth2Client.setCredentials({
+                access_token: newAccessToken,
+                refresh_token: session.refresh_token
+              })
+            } catch (refreshError) {
+              if (refreshError instanceof Error && refreshError.message?.includes('session removed')) {
+                return NextResponse.json({
+                  error: 'Session invalid and removed. Please re-authenticate.'
+                }, { status: 401 })
+              }
+              throw refreshError
+            }
+          }
         }
+        throw error
       }
     }
 

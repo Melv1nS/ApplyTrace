@@ -1,3 +1,6 @@
+## IMPORTANT ##
+WORK INSIDE THE apply-trace DIRECTORY
+
 # Apply Trace
 Every time you choose to apply a rule(s), explicitly state the rule(s) in the output. You can abbreviate the rule description to a single word or phrase.
 
@@ -10,9 +13,6 @@ A web application that will monitor a user's email inbox and check for any job a
 - Prefer iteration and modularization over code duplication
 - Use descriptive variable names with auxiliary verbs (e.g., isLoading, hasError)
 - Structure repository files as follows:
-
-## IMPORTANT ##
-WORK INSIDE THE apply-trace DIRECTORY
 
 ```
 ├── apply-trace/
@@ -53,11 +53,11 @@ WORK INSIDE THE apply-trace DIRECTORY
 # New File Suggestions
 IMPORTANT: For every new file suggestion, you must:
 1. Start with "Create new file at:" followed by the complete path
-2. Use the project root (high-speed-rail/) as the reference point
+2. Use the project root (apply-trace/) as the reference point
 3. Include the file name with appropriate extension
 
 Example:
-Create new file at: high-speed-rail/src/app/utils/dateFormatter.ts
+Create new file at: apply-trace/src/app/utils/dateFormatter.ts
 
 ## Naming Conventions
 - Use lowercase with dashes for directories (e.g., components/form-wizard)
