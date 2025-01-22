@@ -436,34 +436,38 @@ export async function POST(request: Request) {
           })
 
           if (analysis.type === 'REJECTION') {
-            // Search for existing application from this company
+            // Search for existing application from this company (including rejected ones)
             const { data: existingApplications } = await supabaseAdmin
               .from('job_applications')
               .select('*')
               .eq('user_id', session.user_id)
               .eq('company_name', analysis.companyName)
-              .neq('status', JobStatus.REJECTED)  // Don't match already rejected applications
               .order('created_at', { ascending: false })  // Get most recent first
               .limit(1)
 
             if (existingApplications && existingApplications.length > 0) {
-              // Update existing application
-              const { error: updateError } = await supabaseAdmin
-                .from('job_applications')
-                .update({
-                  status: JobStatus.REJECTED,
-                  updated_at: new Date().toISOString(),
-                  rejection_email_id: messageId
-                })
-                .eq('id', existingApplications[0].id)
+              // Only update if the application isn't already rejected
+              if (existingApplications[0].status !== JobStatus.REJECTED) {
+                // Update existing application
+                const { error: updateError } = await supabaseAdmin
+                  .from('job_applications')
+                  .update({
+                    status: JobStatus.REJECTED,
+                    updated_at: new Date().toISOString(),
+                    rejection_email_id: messageId
+                  })
+                  .eq('id', existingApplications[0].id)
 
-              if (updateError) {
-                console.error('Error updating job application status:', updateError)
+                if (updateError) {
+                  console.error('Error updating job application status:', updateError)
+                } else {
+                  console.log('Successfully updated job application status to rejected')
+                }
               } else {
-                console.log('Successfully updated job application status to rejected')
+                console.log('Application already rejected, skipping update')
               }
             } else {
-              // Create new rejected application if no match found
+              // Create new rejected application ONLY if no application exists for this company
               const { error: insertError } = await supabaseAdmin.from('job_applications').insert({
                 id: crypto.randomUUID(),
                 user_id: session.user_id,
@@ -472,11 +476,14 @@ export async function POST(request: Request) {
                 status: JobStatus.REJECTED,
                 applied_date: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
-                email_id: messageId
+                email_id: messageId,
+                rejection_email_id: messageId
               })
 
               if (insertError) {
                 console.error('Error creating rejected job application:', insertError)
+              } else {
+                console.log('Successfully created new rejected application')
               }
             }
           } else {
