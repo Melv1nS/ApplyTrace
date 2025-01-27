@@ -31,13 +31,6 @@ interface GmailApiError {
   }>;
 }
 
-// Add interface for Gemini API errors
-interface GeminiApiError {
-  status: number;
-  message: string;
-  details?: unknown;
-}
-
 // Add new interface for Hugging Face API error
 interface HuggingFaceApiError {
   error: string;
@@ -179,7 +172,7 @@ async function analyzeWithDeepseek(subject: string, emailBody: string): Promise<
     rateLimiter.lastCallTime = Date.now();
 
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/deepseek-ai/DeepSeek-R1",
+      "https://api-inference.huggingface.co/models/deepseek-ai/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
       {
         method: "POST",
         headers: {

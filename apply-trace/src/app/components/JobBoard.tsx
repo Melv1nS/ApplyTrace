@@ -2,15 +2,7 @@
 
 import { DragDropContext, DropResult } from '@hello-pangea/dnd'
 import JobColumn from './JobColumn'
-
-interface Job {
-    id: string
-    company: string
-    position: string
-    status: 'applied' | 'interviewing' | 'offer' | 'rejected' | 'archived'
-    lastUpdated: string
-    location?: string
-}
+import { Job } from '@/app/types/job'
 
 const columns = {
     applied: {

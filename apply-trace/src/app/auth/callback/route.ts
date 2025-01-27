@@ -1,5 +1,5 @@
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { setupGmailWatch } from '@/app/utils/gmailWatch'
@@ -31,7 +31,12 @@ async function getUserEmail(providerToken: string): Promise<string> {
     return profile.emailAddress || ''
 }
 
-async function exchangeCodeWithRetry(supabase: any, code: string, maxRetries = 3) {
+interface ExchangeError {
+    status?: number;
+    message: string;
+}
+
+async function exchangeCodeWithRetry(supabase: SupabaseClient, code: string, maxRetries = 3) {
     let retryCount = 0;
     const baseDelay = 1000; // Start with 1 second delay
 
@@ -51,8 +56,9 @@ async function exchangeCodeWithRetry(supabase: any, code: string, maxRetries = 3
             }
 
             return { data, error: null };
-        } catch (error: any) {
-            if (error.status !== 429 || retryCount === maxRetries - 1) {
+        } catch (error) {
+            const err = error as ExchangeError;
+            if (err.status !== 429 || retryCount === maxRetries - 1) {
                 return { data: null, error };
             }
             retryCount++;
@@ -65,7 +71,7 @@ async function exchangeCodeWithRetry(supabase: any, code: string, maxRetries = 3
     };
 }
 
-export async function GET(request: Request) {
+export async function GET(request: Request): Promise<Response> {
     console.log('Auth callback started')
     try {
         const requestUrl = new URL(request.url)
@@ -151,11 +157,12 @@ export async function GET(request: Request) {
 
         console.log('Auth callback completed, redirecting to home')
         return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}`)
-    } catch (error: any) {
+    } catch (error) {
+        const err = error as Error;
         console.error('Error in callback setup:', {
             error,
-            message: error?.message || 'Unknown error',
-            stack: error?.stack
+            message: err?.message || 'Unknown error',
+            stack: err?.stack
         })
         return NextResponse.redirect(`${process.env.NEXT_PUBLIC_SITE_URL}/auth/signin?error=callback_failed`)
     }

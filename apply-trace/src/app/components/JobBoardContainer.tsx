@@ -254,7 +254,7 @@ export default function JobBoardContainer() {
                             }
                         }
                     )
-                    .subscribe((status) => {
+                    .subscribe((status: 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR' | 'SUBSCRIPTION_ERROR') => {
                         console.log('Subscription status:', status)
 
                         // If subscription fails, try to reconnect
@@ -278,6 +278,12 @@ export default function JobBoardContainer() {
 
         checkAuth()
     }, [supabase, router])
+
+    useEffect(() => {
+        if (jobs.length > 0) {
+            localStorage.setItem('jobs', JSON.stringify(jobs));
+        }
+    }, [jobs]);
 
     // Convert backend jobs to frontend format
     const frontendJobs: Job[] = jobs.map(job => ({
