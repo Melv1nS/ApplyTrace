@@ -183,12 +183,15 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
     const responseText = result.response.text();
 
     try {
-      // Clean up the response text by removing markdown code block formatting
-      const cleanedResponse = responseText
-        .replace(/^```json\s*/, '') // Remove opening ```json
-        .replace(/\s*```$/, ''); // Remove closing ```
+      // Extract JSON content from the response
+      const jsonMatch = responseText.match(/```json\s*({[\s\S]*?})\s*```/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in response');
+      }
 
-      const parsedResult = JSON.parse(cleanedResponse);
+      const jsonContent = jsonMatch[1].trim();
+      const parsedResult = JSON.parse(jsonContent);
+
       // Reset retry count on success
       rateLimiter.reset();
       return parsedResult;
