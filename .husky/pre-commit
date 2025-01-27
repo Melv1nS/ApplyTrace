@@ -1,0 +1,1 @@
+#!/bin/sh\n\ncd apply-trace && npx lint-staged
