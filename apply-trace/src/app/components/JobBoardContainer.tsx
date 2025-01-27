@@ -131,52 +131,39 @@ export default function JobBoardContainer() {
     }
 
     useEffect(() => {
-        // Check auth status
         const checkAuth = async () => {
             console.log('Checking auth status...')
-            const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+            const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-            if (sessionError) {
-                console.error('Session error:', {
-                    error: sessionError,
-                    message: sessionError.message,
-                    status: sessionError.status
+            if (userError) {
+                console.error('Auth error:', {
+                    error: userError,
+                    message: userError.message,
+                    status: userError.status
                 })
                 router.push('/auth/signin')
                 return
             }
 
-            if (!session) {
-                console.log('No session found, redirecting to signin')
+            if (!user) {
+                console.log('No user found, redirecting to signin')
                 router.push('/auth/signin')
                 return
             }
 
-            console.log('Session found:', {
-                userId: session.user.id,
-                email: session.user.email,
-                hasAccessToken: !!session.access_token,
-                expiresAt: session.expires_at
+            console.log('User found:', {
+                userId: user.id,
+                email: user.email,
+                expiresAt: user.confirmed_at
             })
 
             // Fetch initial jobs
             console.log('Fetching initial jobs...')
             try {
-                // Test authentication
-                const { data: user, error: userError } = await supabase.auth.getUser()
-                if (userError) {
-                    console.error('Error getting user:', userError)
-                    return
-                }
-                console.log('Authenticated as user:', {
-                    id: user.user?.id,
-                    email: user.user?.email
-                })
-
                 const { data: initialJobs, error: fetchError } = await supabase
                     .from('job_applications')
                     .select('*')
-                    .eq('user_id', session.user.id)
+                    .eq('user_id', user.id)
                     .eq('is_deleted', false)
                     .order('updated_at', { ascending: false })
 
@@ -204,25 +191,25 @@ export default function JobBoardContainer() {
 
                 // Subscribe to changes
                 console.log('Setting up real-time subscription...', {
-                    userId: session.user.id,
-                    channelName: `realtime:job_applications:${session.user.id}`,
+                    userId: user.id,
+                    channelName: `realtime:job_applications:${user.id}`,
                     config: {
                         event: '*',
                         schema: 'public',
                         table: 'job_applications',
-                        filter: `user_id=eq.${session.user.id}`
+                        filter: `user_id=eq.${user.id}`
                     }
                 })
 
                 const channel = supabase
-                    .channel(`realtime:job_applications:${session.user.id}`)
+                    .channel(`realtime:job_applications:${user.id}`)
                     .on(
                         'postgres_changes',
                         {
                             event: '*',
                             schema: 'public',
                             table: 'job_applications',
-                            filter: `user_id=eq.${session.user.id}`  // Match the RLS policy
+                            filter: `user_id=eq.${user.id}`  // Match the RLS policy
                         },
                         (payload) => {
                             console.log('Database change received:', {
@@ -232,12 +219,12 @@ export default function JobBoardContainer() {
                                 table: payload.table,
                                 schema: payload.schema,
                                 timestamp: new Date().toISOString(),
-                                userId: session.user.id
+                                userId: user.id
                             })
 
                             // Check if this change is for the current user
                             const jobData = (payload.new || payload.old) as JobApplication | undefined
-                            if (!jobData || jobData.user_id !== session.user.id) {
+                            if (!jobData || jobData.user_id !== user.id) {
                                 console.log('Ignoring change for different user:', jobData?.user_id)
                                 return
                             }

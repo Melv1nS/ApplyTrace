@@ -10,17 +10,17 @@ export const config = {
 export async function middleware(req: NextRequest) {
     const res = NextResponse.next()
     const supabase = createMiddlewareClient({ req, res })
-    const { data: { session } } = await supabase.auth.getSession()
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // If there's no session and we're not on an auth page, redirect to signin
-    if (!session && !req.nextUrl.pathname.startsWith('/auth')) {
+    // If there's no user and we're not on an auth page, redirect to signin
+    if (!user && !req.nextUrl.pathname.startsWith('/auth')) {
         const redirectUrl = req.nextUrl.clone()
         redirectUrl.pathname = '/auth/signin'
         return NextResponse.redirect(redirectUrl)
     }
 
-    // If we have a session and we're on an auth page, redirect to home
-    if (session && req.nextUrl.pathname.startsWith('/auth')) {
+    // If we have a user and we're on an auth page, redirect to home
+    if (user && req.nextUrl.pathname.startsWith('/auth')) {
         const redirectUrl = req.nextUrl.clone()
         redirectUrl.pathname = '/'
         return NextResponse.redirect(redirectUrl)
