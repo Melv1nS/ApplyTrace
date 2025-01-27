@@ -171,58 +171,78 @@ async function analyzeWithDeepseek(subject: string, emailBody: string): Promise<
 
     rateLimiter.lastCallTime = Date.now();
 
-    const response = await fetch(
-      "https://api-inference.huggingface.co/models/google/gemma-2-2b-jpn-it",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          inputs: JOB_EMAIL_ANALYSIS_PROMPT
-            .replace('${subject}', subject)
-            .replace('${emailBody}', emailBody),
-          parameters: {
-            max_new_tokens: 1024,
-            temperature: 0.1,
-            top_p: 0.95,
-            return_full_text: false,
-            do_sample: true
-          }
-        }),
+    // Add retry logic for model loading
+    const maxLoadingRetries = 3;
+    const loadingRetryDelay = 2000; // 2 seconds
+
+    for (let attempt = 0; attempt <= maxLoadingRetries; attempt++) {
+      const response = await fetch(
+        "https://api-inference.huggingface.co/models/google/gemma-2-2b-jpn-it",
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputs: JOB_EMAIL_ANALYSIS_PROMPT
+              .replace('${subject}', subject)
+              .replace('${emailBody}', emailBody),
+            parameters: {
+              max_new_tokens: 1024,
+              temperature: 0.1,
+              top_p: 0.95,
+              return_full_text: false,
+              do_sample: true
+            }
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        if (error.error?.toLowerCase().includes('currently loading') && attempt < maxLoadingRetries) {
+          console.log(`Model is loading, attempt ${attempt + 1}/${maxLoadingRetries}. Waiting ${loadingRetryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, loadingRetryDelay));
+          continue;
+        }
+        throw new Error(`Hugging Face API error: ${error.error || 'Unknown error'}`);
       }
-    );
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Hugging Face API error: ${error.error || 'Unknown error'}`);
+      const result = await response.json();
+
+      // The API returns an array of generated texts
+      const generatedText = Array.isArray(result) ? result[0].generated_text : result.generated_text;
+
+      // Remove any markdown code block formatting if present
+      const jsonStr = generatedText.replace(/^```json\n|\n```$/g, '').trim();
+
+      try {
+        const parsedResult = JSON.parse(jsonStr);
+        // Reset retry count on success
+        rateLimiter.reset();
+        return parsedResult;
+      } catch (parseError) {
+        console.error('Failed to parse Deepseek response:', parseError);
+        // Return a default analysis for parsing errors
+        return {
+          isJobRelated: false,
+          type: 'OTHER',
+          companyName: 'Unknown',
+          roleTitle: 'Unknown',
+          confidence: 0
+        };
+      }
     }
 
-    const result = await response.json();
-
-    // The API returns an array of generated texts
-    const generatedText = Array.isArray(result) ? result[0].generated_text : result.generated_text;
-
-    // Remove any markdown code block formatting if present
-    const jsonStr = generatedText.replace(/^```json\n|\n```$/g, '').trim();
-
-    try {
-      return JSON.parse(jsonStr);
-    } catch (parseError) {
-      console.error('Failed to parse Deepseek response:', parseError);
-      // Return a default analysis for parsing errors
-      return {
-        isJobRelated: false,
-        type: 'OTHER',
-        companyName: 'Unknown',
-        roleTitle: 'Unknown',
-        confidence: 0
-      };
-    }
-
-    // Reset retry count on success
-    rateLimiter.reset();
+    // If all retries failed, return default analysis
+    return {
+      isJobRelated: false,
+      type: 'OTHER',
+      companyName: 'Unknown',
+      roleTitle: 'Unknown',
+      confidence: 0
+    };
   } catch (error: unknown) {
     const hfError = error as HuggingFaceApiError;
     if (hfError?.status === 429 && rateLimiter.retryCount < rateLimiter.maxRetries) {
