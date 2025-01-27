@@ -2,7 +2,6 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
 import { JobStatus } from '@prisma/client'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import crypto from 'crypto'
 import { checkAndRenewGmailWatch } from '@/app/utils/gmailWatch'
 import { JOB_EMAIL_ANALYSIS_PROMPT } from '@/app/utils/geminiPrompts'
@@ -37,6 +36,12 @@ interface GeminiApiError {
   status: number;
   message: string;
   details?: unknown;
+}
+
+// Add new interface for Hugging Face API error
+interface HuggingFaceApiError {
+  error: string;
+  status?: number;
 }
 
 // Create a Supabase client with the service role key
@@ -159,7 +164,7 @@ async function refreshAccessToken(refreshToken: string, userEmail: string) {
   }
 }
 
-async function analyzeWithGemini(subject: string, emailBody: string): Promise<GeminiAnalysis> {
+async function analyzeWithDeepseek(subject: string, emailBody: string): Promise<GeminiAnalysis> {
   try {
     // Rate limiting with exponential backoff
     const now = Date.now();
@@ -173,30 +178,67 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
 
     rateLimiter.lastCallTime = Date.now();
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/deepseek-ai/DeepSeek-R1",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          inputs: JOB_EMAIL_ANALYSIS_PROMPT
+            .replace('${subject}', subject)
+            .replace('${emailBody}', emailBody),
+          parameters: {
+            max_new_tokens: 1024,
+            temperature: 0.1,
+            top_p: 0.95,
+            return_full_text: false,
+            do_sample: true
+          }
+        }),
+      }
+    );
 
-    const prompt = JOB_EMAIL_ANALYSIS_PROMPT.replace('${subject}', subject).replace('${emailBody}', emailBody);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`Hugging Face API error: ${error.error || 'Unknown error'}`);
+    }
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text().trim();
+    const result = await response.json();
+
+    // The API returns an array of generated texts
+    const generatedText = Array.isArray(result) ? result[0].generated_text : result.generated_text;
+
+    // Remove any markdown code block formatting if present
+    const jsonStr = generatedText.replace(/^```json\n|\n```$/g, '').trim();
+
+    try {
+      return JSON.parse(jsonStr);
+    } catch (parseError) {
+      console.error('Failed to parse Deepseek response:', parseError);
+      // Return a default analysis for parsing errors
+      return {
+        isJobRelated: false,
+        type: 'OTHER',
+        companyName: 'Unknown',
+        roleTitle: 'Unknown',
+        confidence: 0
+      };
+    }
 
     // Reset retry count on success
     rateLimiter.reset();
-
-    // Remove any markdown code block formatting if present
-    const jsonStr = text.replace(/^```json\n|\n```$/g, '').trim();
-    return JSON.parse(jsonStr);
   } catch (error: unknown) {
-    const geminiError = error as GeminiApiError;
-    if (geminiError?.status === 429 && rateLimiter.retryCount < rateLimiter.maxRetries) {
+    const hfError = error as HuggingFaceApiError;
+    if (hfError?.status === 429 && rateLimiter.retryCount < rateLimiter.maxRetries) {
       rateLimiter.retryCount++;
       console.log(`Rate limited, attempt ${rateLimiter.retryCount}/${rateLimiter.maxRetries}. Retrying in ${rateLimiter.getBackoffDelay()}ms`);
-      return analyzeWithGemini(subject, emailBody);
+      return analyzeWithDeepseek(subject, emailBody);
     }
 
-    console.error('Failed to analyze with Gemini:', error);
+    console.error('Failed to analyze with Deepseek:', error);
     // Return a default analysis for errors
     return {
       isJobRelated: false,
@@ -527,7 +569,7 @@ export async function POST(request: Request) {
           to,
           bodyLength: messageBody.length  // Log the length of the body for debugging
         })
-        const analysis = await analyzeWithGemini(subject, messageBody)
+        const analysis = await analyzeWithDeepseek(subject, messageBody)
         console.log('Analysis result:', analysis)
 
         if (analysis.isJobRelated && analysis.confidence > 0.7) {
