@@ -183,12 +183,18 @@ async function analyzeWithGemini(subject: string, emailBody: string): Promise<Ge
     const responseText = result.response.text();
 
     try {
-      const parsedResult = JSON.parse(responseText);
+      // Clean up the response text by removing markdown code block formatting
+      const cleanedResponse = responseText
+        .replace(/^```json\s*/, '') // Remove opening ```json
+        .replace(/\s*```$/, ''); // Remove closing ```
+
+      const parsedResult = JSON.parse(cleanedResponse);
       // Reset retry count on success
       rateLimiter.reset();
       return parsedResult;
     } catch (parseError) {
       console.error('Failed to parse Gemini response:', parseError);
+      console.error('Raw response:', responseText);
       // Return a default analysis for parsing errors
       return {
         isJobRelated: false,
