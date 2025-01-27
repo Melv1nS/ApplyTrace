@@ -1,2 +1,6 @@
-npm lint
-npm type-check
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+cd apply-trace
+npm run lint
+npm run type-check
