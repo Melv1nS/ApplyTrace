@@ -5,6 +5,7 @@ import { JobStatus } from '@prisma/client'
 import crypto from 'crypto'
 import { checkAndRenewGmailWatch } from '@/app/utils/gmailWatch'
 import { JOB_EMAIL_ANALYSIS_PROMPT } from '@/app/utils/geminiPrompts'
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Add interface for Gemini response
 interface GeminiAnalysis {
@@ -157,7 +158,7 @@ async function refreshAccessToken(refreshToken: string, userEmail: string) {
   }
 }
 
-async function analyzeWithDeepseek(subject: string, emailBody: string): Promise<GeminiAnalysis> {
+async function analyzeWithGemini(subject: string, emailBody: string): Promise<GeminiAnalysis> {
   try {
     // Rate limiting with exponential backoff
     const now = Date.now();
@@ -171,87 +172,34 @@ async function analyzeWithDeepseek(subject: string, emailBody: string): Promise<
 
     rateLimiter.lastCallTime = Date.now();
 
-    // Add retry logic for model loading
-    const maxLoadingRetries = 3;
-    const loadingRetryDelay = 2000; // 2 seconds
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    for (let attempt = 0; attempt <= maxLoadingRetries; attempt++) {
-      const response = await fetch(
-        "https://api-inference.huggingface.co/models/google/gemma-2-2b-jpn-it",
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            inputs: JOB_EMAIL_ANALYSIS_PROMPT
-              .replace('${subject}', subject)
-              .replace('${emailBody}', emailBody),
-            parameters: {
-              max_new_tokens: 1024,
-              temperature: 0.1,
-              top_p: 0.95,
-              return_full_text: false,
-              do_sample: true
-            }
-          }),
-        }
-      );
+    const prompt = JOB_EMAIL_ANALYSIS_PROMPT
+      .replace('${subject}', subject)
+      .replace('${emailBody}', emailBody);
 
-      if (!response.ok) {
-        const error = await response.json();
-        if (error.error?.toLowerCase().includes('currently loading') && attempt < maxLoadingRetries) {
-          console.log(`Model is loading, attempt ${attempt + 1}/${maxLoadingRetries}. Waiting ${loadingRetryDelay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, loadingRetryDelay));
-          continue;
-        }
-        throw new Error(`Hugging Face API error: ${error.error || 'Unknown error'}`);
-      }
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
 
-      const result = await response.json();
-
-      // The API returns an array of generated texts
-      const generatedText = Array.isArray(result) ? result[0].generated_text : result.generated_text;
-
-      // Remove any markdown code block formatting if present
-      const jsonStr = generatedText.replace(/^```json\n|\n```$/g, '').trim();
-
-      try {
-        const parsedResult = JSON.parse(jsonStr);
-        // Reset retry count on success
-        rateLimiter.reset();
-        return parsedResult;
-      } catch (parseError) {
-        console.error('Failed to parse Deepseek response:', parseError);
-        // Return a default analysis for parsing errors
-        return {
-          isJobRelated: false,
-          type: 'OTHER',
-          companyName: 'Unknown',
-          roleTitle: 'Unknown',
-          confidence: 0
-        };
-      }
+    try {
+      const parsedResult = JSON.parse(responseText);
+      // Reset retry count on success
+      rateLimiter.reset();
+      return parsedResult;
+    } catch (parseError) {
+      console.error('Failed to parse Gemini response:', parseError);
+      // Return a default analysis for parsing errors
+      return {
+        isJobRelated: false,
+        type: 'OTHER',
+        companyName: 'Unknown',
+        roleTitle: 'Unknown',
+        confidence: 0
+      };
     }
-
-    // If all retries failed, return default analysis
-    return {
-      isJobRelated: false,
-      type: 'OTHER',
-      companyName: 'Unknown',
-      roleTitle: 'Unknown',
-      confidence: 0
-    };
   } catch (error: unknown) {
-    const hfError = error as HuggingFaceApiError;
-    if (hfError?.status === 429 && rateLimiter.retryCount < rateLimiter.maxRetries) {
-      rateLimiter.retryCount++;
-      console.log(`Rate limited, attempt ${rateLimiter.retryCount}/${rateLimiter.maxRetries}. Retrying in ${rateLimiter.getBackoffDelay()}ms`);
-      return analyzeWithDeepseek(subject, emailBody);
-    }
-
-    console.error('Failed to analyze with Deepseek:', error);
+    console.error('Failed to analyze with Gemini:', error);
     // Return a default analysis for errors
     return {
       isJobRelated: false,
@@ -582,7 +530,7 @@ export async function POST(request: Request) {
           to,
           bodyLength: messageBody.length  // Log the length of the body for debugging
         })
-        const analysis = await analyzeWithDeepseek(subject, messageBody)
+        const analysis = await analyzeWithGemini(subject, messageBody)
         console.log('Analysis result:', analysis)
 
         if (analysis.isJobRelated && analysis.confidence > 0.7) {
