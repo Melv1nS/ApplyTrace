@@ -172,7 +172,7 @@ async function analyzeWithDeepseek(subject: string, emailBody: string): Promise<
     rateLimiter.lastCallTime = Date.now();
 
     const response = await fetch(
-      "https://api-inference.huggingface.co/models/deepseek-ai/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+      "https://api-inference.huggingface.co/models/google/gemma-2-2b-jpn-it",
       {
         method: "POST",
         headers: {
